@@ -9,8 +9,9 @@ import numpy as np
 from itertools import product
 from multiprocessing import Pool
 
-from sklearn.svm import SVC
+# For testings with sklearn's CSP and SPoC
 # from mne.decoding import CSP, SPoC
+from sklearn.svm import SVC
 from sklearn.neural_network import MLPClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
@@ -97,15 +98,16 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
         learning_rate='adaptive',
         n_iter_no_change=200
     )
-    classifiers = [lda, log_reg, rfc, svm, gbc, mlp]
+    estimators = [lda, log_reg, rfc, svm, gbc, mlp]
 
+    # For testing with sklearn's CSP and SPoC
     # csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
     # spoc = SPoC(n_components=15, log=True, reg='oas', rank='full')
     custom_csp = CustomCSP(n_components=16)
-    decoders = [custom_csp]
+    preprocessing_methods = [custom_csp]
 
     pipelines = []
-    for decoder, classifier in product(decoders, classifiers):
+    for decoder, classifier in product(preprocessing_methods, estimators):
         pipeline = make_pipeline(decoder, classifier)
         decoder_name = decoder.__class__.__name__
         classifier_name = classifier.__class__.__name__
@@ -229,7 +231,7 @@ def predict_subject(subject: int, run: int):
     print(f"{'-' * 36}\nAccuracy: {accuracy_manual * 100:.2f}%")
 
 
-def train_predict(subject: int, run: int, mode: str):
+def train_or_predict_single_subject(subject: int, run: int, mode: str):
     """
     Train or predict the model for a given subject and run.
 
@@ -279,6 +281,7 @@ def train_all_subjects():
     Returns:
         None
     """
+    # For testing, we won't use all 109 subjects
     subjects = list(range(1, 5))
     experiments = get_program_config()['experiments']
 
@@ -325,7 +328,7 @@ def bci():
             subject=args.subject,
             run=args.run,
             mode=args.mode)
-        train_predict(subject=subject, run=run, mode=mode)
+        train_or_predict_single_subject(subject=subject, run=run, mode=mode)
 
 
 def main():
