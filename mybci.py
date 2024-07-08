@@ -339,7 +339,9 @@ def bci():
         subject, run, mode = verify_inputs(
             subject=args.subject,
             run=args.run,
-            mode=args.mode)
+            mode=args.mode
+        )
+
         train_or_predict_single_subject(subject=subject, run=run, mode=mode)
 
 

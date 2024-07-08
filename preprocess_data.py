@@ -10,6 +10,7 @@ from mne import concatenate_raws, Epochs, annotations_from_events, pick_types
 
 from utils.utils import get_experiment_name
 from utils.decorators import time_limit
+from plotter.plotter import Plotter
 
 
 def event_description(run: int) -> dict:
@@ -244,7 +245,53 @@ def annotate_raw(raw: RawEDF, run: int):
     return raw
 
 
-def preprocess_subject(subject: int, runs: list[int], ica: bool) -> RawEDF:
+def process(data: list, run: int, ica: bool, plot: bool):
+    """
+    Pre-processing sequence for the raw data. The function loads
+    the raw data, standardizes the channels, annotates the data,
+    filters the data, applies Independent Component Analysis (ICA),
+    re-references the data, and down-samples the data.
+
+    Args:
+        data (RawEDF): The raw data to process.
+        run (int): The run number.
+        ica (bool): Whether to apply Independent Component Analysis
+            (ICA) to the raw data.
+        plot (bool): Whether to plot the raw data.
+
+    Returns:
+        RawEDF: The pre-processed raw data.
+    """
+    plotter = Plotter(plot_enabled=plot)
+
+    raw = concatenate_raws([
+        read_raw_edf(f, preload=True, verbose=False) for f in data
+    ])
+    plotter.enable_plot(plotter.plot_raw_data)(raw=raw)
+
+    standardize_channels(raw=raw)
+    plotter.enable_plot(plotter.plot_standard_montage)(raw=raw)
+
+    annotate_raw(raw=raw, run=run)
+    plotter.enable_plot(plotter.plot_annotations)(raw=raw)
+
+    filter_raw(raw=raw)
+    plotter.enable_plot(plotter.plot_filtered_data)(raw=raw)
+
+    if ica:
+        ica_filter(raw=raw)
+        plotter.enable_plot(plotter.plot_ica)(raw=raw)
+
+    re_reference_raw(raw=raw)
+    plotter.enable_plot(plotter.plot_re_referenced_data)(raw=raw)
+
+    downsample_raw(raw=raw, sfreq=160)
+    plotter.enable_plot(plotter.plot_downsampled_data)(raw=raw)
+
+    return raw
+
+
+def preprocess_subject(subject: int, runs: list[int], ica: bool, plot: bool):
     """
     Pre-processing sequence for the raw data. The function loads
     the raw data, standardizes the channels, annotates the data,
@@ -260,6 +307,7 @@ def preprocess_subject(subject: int, runs: list[int], ica: bool) -> RawEDF:
         runs (list[int]): List of run numbers.
         ica (bool): Whether to apply Independent Component Analysis
             (ICA) to the raw data.
+        plot (bool): Whether to plot the raw data.
 
     Returns:
         RawEDF: The pre-processed raw data for all
@@ -269,21 +317,11 @@ def preprocess_subject(subject: int, runs: list[int], ica: bool) -> RawEDF:
     for run in runs:
         data = eegbci.load_data(
             subject=subject,
-            runs=run,
+            runs=runs,
             path='data/',
             verbose=0
         )
-        raws = concatenate_raws([
-            read_raw_edf(f, preload=True, verbose=False) for f in data
-        ])
-        standardize_channels(raw=raws)
-        annotate_raw(raw=raws, run=run)
-        filter_raw(raw=raws)
-        if ica:
-            ica_filter(raw=raws)
-        re_reference_raw(raw=raws)
-        downsample_raw(raw=raws, sfreq=160)
-        raws_list.append(raws)
+        raws_list.append(process(data=data, run=run, ica=ica, plot=plot))
 
     return concatenate_raws(raws_list)
 
@@ -378,7 +416,12 @@ def preprocess_data(subject: int, runs: list[int], ica: bool) -> tuple:
             features and labels extracted from the epochs.
     """
     try:
-        raw = preprocess_subject(subject=subject, runs=runs, ica=ica)
+        raw = preprocess_subject(
+            subject=subject,
+            runs=runs,
+            ica=ica,
+            plot=True
+        )
         return extract_features(epochs=create_epochs(raw=raw))
 
     except Exception as e:
