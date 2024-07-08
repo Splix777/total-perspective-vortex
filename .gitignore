@@ -1,8 +1,0 @@
-data/
-models
-.venv/
-*/__pycache__/
-.idea/
-
-*.pyc
-.gitignore
