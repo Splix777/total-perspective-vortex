@@ -1,20 +1,22 @@
 import os
+import sys
 import pickle
 import argparse
 import contextlib
+
 import numpy as np
 
 from itertools import product
-from mne.decoding import CSP, SPoC
 
+from sklearn.svm import SVC
+# from mne.decoding import CSP, SPoC
+from sklearn.neural_network import MLPClassifier
+from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import make_pipeline, Pipeline
-from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.model_selection import ShuffleSplit
-from sklearn.svm import SVC
+from sklearn.model_selection import cross_val_score, train_test_split
 
 from csp import CustomCSP
 from preprocess_data import preprocess_data
@@ -79,8 +81,8 @@ def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
     with open(os.devnull, 'w') as fnull:
         with contextlib.redirect_stdout(fnull):
             for train_index, test_index in cv.split(epochs):
-                X_train, X_test = epochs[train_index], epochs[test_index]
-                y_train, y_test = labels[train_index], labels[test_index]
+                X_train = epochs[train_index]
+                y_train = labels[train_index]
                 pipeline.fit(X_train, y_train)
 
             score = cross_val_score(
@@ -124,8 +126,8 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
     )
     classifiers = [lda, log_reg, rfc, svm, gbc, mlp]
 
-    csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
-    spoc = SPoC(n_components=15, log=True, reg='oas', rank='full')
+    # csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
+    # spoc = SPoC(n_components=15, log=True, reg='oas', rank='full')
     custom_csp = CustomCSP(n_components=8)
     decoders = [custom_csp]
 
@@ -186,8 +188,7 @@ def predict_subject(subject: int, run: int):
         run (int): The run number.
 
     Returns:
-        float: The accuracy score of
-            the model on the test set.
+        None
     """
     experiment_name = get_experiment_name(run)
 
@@ -217,8 +218,6 @@ def predict_subject(subject: int, run: int):
 
     print(f"Accuracy: {accuracy:.4f}")
 
-    return accuracy
-
 
 def train_all_subjects():
     """
@@ -227,7 +226,7 @@ def train_all_subjects():
     Returns:
         None
     """
-    subjects = list(range(1, 11))
+    subjects = list(range(1, 5))
     config = get_program_config()
     experiments = config['experiments']
 
@@ -253,11 +252,9 @@ def train_all_subjects():
     print(f"Mean Accuracy all experiments: {mean_all_experiments * 100:.2f}%")
 
 
-def bci(subject=None, run=None, mode=None):
+def bci(subject: int, run: int, mode: str):
     """
-    Train or predict the model based on the input arguments.
-    If no arguments are provided, train the model for all
-    subjects and runs.
+    Train or predict the model for a given subject and run.
 
     Args:
         subject (int): The subject number.
@@ -266,26 +263,42 @@ def bci(subject=None, run=None, mode=None):
 
     Returns:
         None
+
+    Raises:
+        ValueError: If the mode is not 'train' or 'predict'.
     """
-    if all([subject, run, mode]) is not None:
-        if mode == 'train':
-            score = train_subject(subject=subject, runs=run)
-            print(f"Cross Val Score: {score * 100:.2f}%")
-        if mode == 'predict':
-            return predict_subject(subject, run)
+    if mode == 'predict':
+        predict_subject(subject, run)
+    elif mode == 'train':
+        score = train_subject(subject=subject, runs=run)
+        print(f"Cross Val Score: {score * 100:.2f}%")
     else:
-        train_all_subjects()
+        raise ValueError('Mode must be either "train" or "predict"')
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--subject', type=int, default=None)
-    parser.add_argument('--run', type=int, default=None)
-    parser.add_argument('--mode', type=str, default=None)
-    args = parser.parse_args()
+    """
+    Main function to run the program.
 
-    subject, run, mode = verify_inputs(args.subject, args.run, args.mode)
-    bci(subject, run, mode)
+    Trains the model for all subjects if no arguments are provided.
+
+    If arguments are provided, the program will train or predict
+    the model for a given subject and run number.
+
+    Returns:
+        None
+    """
+    if len(sys.argv) == 1:
+        train_all_subjects()
+    else:
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--subject', type=int, required=True)
+        parser.add_argument('--run', type=int, required=True)
+        parser.add_argument('--mode', type=str, required=True)
+        args = parser.parse_args()
+
+        subject, run, mode = verify_inputs(args.subject, args.run, args.mode)
+        bci(subject, run, mode)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,4 @@
 import numpy as np
-from matplotlib import pyplot as plt
 from sklearn.base import BaseEstimator, TransformerMixin
 from scipy import linalg
 from scipy.linalg import eigh
@@ -8,7 +7,25 @@ from preprocess_data import preprocess_data
 
 
 class CustomCSP(BaseEstimator, TransformerMixin):
+    """
+    Custom implementation of the Common Spatial Patterns (CSP).
+    CSP is a method to extract features from EEG data that are
+    discriminative for a given classification task.
 
+    Parameters:
+    - n_components: int, default=4
+        The number of CSP components to extract.
+
+    Attributes:
+    - filters: ndarray, shape (n_components, n_channels)
+        The CSP filters.
+    - n_classes: array, shape (n_classes,)
+        The unique class labels.
+    - mean: ndarray, shape (n_components,)
+        The mean of the transformed data.
+    - std: ndarray, shape (n_components,)
+        The standard deviation of the transformed data.
+    """
     def __init__(self, n_components=4):
         self.n_components = n_components
         self.filters = None
@@ -16,7 +33,7 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         self.mean = None
         self.std = None
 
-    def calculate_cov_(self, X, y, sns=None):
+    def calculate_cov_(self, X, y):
         n_epochs, n_channels, n_times = X.shape
         self.n_classes = np.unique(y)
         covs = []
