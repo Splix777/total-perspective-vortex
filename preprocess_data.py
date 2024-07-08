@@ -8,7 +8,7 @@ from mne import events_from_annotations
 from mne.channels import make_standard_montage
 from mne import concatenate_raws, Epochs, annotations_from_events, pick_types
 
-from utils import define_experiment, get_program_config
+from utils import get_experiment_name
 
 
 def event_description(run: int) -> dict:
@@ -26,8 +26,7 @@ def event_description(run: int) -> dict:
     Raises:
         ValueError: If the run is invalid.
     """
-    config = get_program_config()
-    experiment = define_experiment(run=run, config=config)
+    experiment = get_experiment_name(run=run)
 
     if experiment == 'left_right_fist':
         return {1: 'bads', 2: 'real_left', 3: 'real_right'}
@@ -41,7 +40,7 @@ def event_description(run: int) -> dict:
         raise ValueError(f'Invalid run {run}')
 
 
-def ica_filter(raw: RawEDF) -> None:
+def ica_filter(raw: RawEDF):
     """
     Independent Component Analysis (ICA) is used to remove
     eye movement artifacts from the raw data. The function
@@ -243,7 +242,7 @@ def annotate_raw(raw: RawEDF, run: int):
     return raw
 
 
-def preprocess_subject(subjects: list[int], runs: list[int]) -> RawEDF:
+def preprocess_subject(subject: int, runs: list[int]) -> RawEDF:
     """
     Pre-processing sequence for the raw data. The function loads
     the raw data, standardizes the channels, annotates the data,
@@ -255,32 +254,31 @@ def preprocess_subject(subjects: list[int], runs: list[int]) -> RawEDF:
     and run combination is concatenated into a single raw object.
 
     Args:
-        subjects (list[int]): List of subject numbers.
+        subject (int): The subject number.
         runs (list[int]): List of run numbers.
 
     Returns:
-        RawEDF: The pre-processed raw data for all subject and
+        RawEDF: The pre-processed raw data for all
             run combinations provided in the arguments.
     """
     raws_list = []
-    for subject in subjects:
-        for run in runs:
-            data = eegbci.load_data(
-                subject=subject,
-                runs=run,
-                path='data/',
-                verbose=False
-            )
-            raws = concatenate_raws([
-                read_raw_edf(f, preload=True, verbose=False) for f in data
-            ])
-            standardize_channels(raw=raws)
-            annotate_raw(raw=raws, run=run)
-            filter_raw(raw=raws)
-            # ica_filter(raw=raws)
-            re_reference_raw(raw=raws)
-            downsample_raw(raw=raws, sfreq=160)
-            raws_list.append(raws)
+    for run in runs:
+        data = eegbci.load_data(
+            subject=subject,
+            runs=run,
+            path='data/',
+            verbose=False
+        )
+        raws = concatenate_raws([
+            read_raw_edf(f, preload=True, verbose=False) for f in data
+        ])
+        standardize_channels(raw=raws)
+        annotate_raw(raw=raws, run=run)
+        filter_raw(raw=raws)
+        # ica_filter(raw=raws)
+        re_reference_raw(raw=raws)
+        downsample_raw(raw=raws, sfreq=160)
+        raws_list.append(raws)
 
     return concatenate_raws(raws_list)
 
@@ -346,7 +344,7 @@ def extract_features(epochs: Epochs) -> tuple[np.ndarray, np.ndarray]:
     return features, labels
 
 
-def preprocess_data(subjects: list[int], runs: list[int]) -> tuple:
+def preprocess_data(subject: int, runs: list[int]) -> tuple:
     """
     Pre-processes the data for the specified subjects and runs.
     The pre-processing steps include loading the raw data,
@@ -365,12 +363,19 @@ def preprocess_data(subjects: list[int], runs: list[int]) -> tuple:
     and the labels are the event markers associated with each epoch.
 
     Args:
-        subjects (list[int]): List of subject numbers.
+        subject (int): The subject number.
         runs (list[int]): List of run numbers.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: A tuple containing the
             features and labels extracted from the epochs.
     """
-    raw = preprocess_subject(subjects=subjects, runs=runs)
-    return extract_features(epochs=create_epochs(raw=raw))
+    try:
+        raw = preprocess_subject(subject=subject, runs=runs)
+        return extract_features(epochs=create_epochs(raw=raw))
+
+    except (ValueError, FileNotFoundError) as e:
+        print(f'Error: {e}')
+    except Exception as e:
+        print(f'An error occurred: {e}')
+    return None, None
