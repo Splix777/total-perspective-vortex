@@ -7,6 +7,7 @@ import contextlib
 import numpy as np
 
 from itertools import product
+from multiprocessing import Pool
 
 from sklearn.svm import SVC
 # from mne.decoding import CSP, SPoC
@@ -17,6 +18,7 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.model_selection import ShuffleSplit
 from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.metrics import accuracy_score
 
 from csp import CustomCSP
 from preprocess_data import preprocess_data
@@ -68,30 +70,6 @@ def load_model(directory: str, file: str) -> Pipeline | None:
         raise ValueError(f'Error loading model: {e}') from e
 
 
-def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
-    """
-    Train the model using cross-validation and return the
-    average accuracy score.
-
-    Args:
-        epochs (np.ndarray): The epoch data.
-        labels (np.ndarray): The labels' data.
-        pipeline (Pipeline): The pipeline to train.
-
-    Returns:
-        np.ndarray: The accuracy scores for each fold.
-    """
-    cv = ShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
-    with open(os.devnull, 'w') as fnull:
-        with contextlib.redirect_stdout(fnull):
-            for train_index, test_index in cv.split(epochs):
-                X_train = epochs[train_index]
-                y_train = labels[train_index]
-                pipeline.fit(X_train, y_train)
-
-    return cross_val_score(pipeline, epochs, labels, cv=cv, scoring='accuracy')
-
-
 def create_pipelines() -> list[tuple[str, Pipeline]]:
     """
     Create a list of pipelines to train the model.
@@ -135,6 +113,31 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
         pipelines.append((pipeline_name, pipeline))
 
     return pipelines
+
+
+def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
+    """
+    Train the model using cross-validation and return the
+    average accuracy score.
+
+    Args:
+        epochs (np.ndarray): The epoch data.
+        labels (np.ndarray): The labels' data.
+        pipeline (Pipeline): The pipeline to train.
+
+    Returns:
+        np.ndarray: The accuracy scores for each fold.
+    """
+    cv = ShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
+
+    with open(os.devnull, 'w') as fnull:
+        with contextlib.redirect_stdout(fnull):
+            for train_index, test_index in cv.split(epochs):
+                X_train = epochs[train_index]
+                y_train = labels[train_index]
+                pipeline.fit(X_train, y_train)
+
+    return cross_val_score(pipeline, epochs, labels, cv=cv, scoring='accuracy')
 
 
 def train_subject(subject: int, runs: int | list[int], save: bool = True):
@@ -212,49 +215,18 @@ def predict_subject(subject: int, run: int):
         epochs,
         labels,
         test_size=0.2,
-        random_state=42)
+        random_state=42
+    )
 
     predictions = model.predict(X_test)
-    accuracy = model.score(X_test, y_test)
+    accuracy_manual = accuracy_score(y_test, predictions)
 
-    print("epoch nb: [prediction] [truth] equal?")
+    print(f"epoch nb: [prediction] [truth] equal?\n{'-' * 36}")
     for i, (pred, truth) in enumerate(zip(predictions, y_test)):
         equal = pred == truth
-        print(f"epoch {i:02}: [{pred}] [{truth}] {equal}")
+        print(f"epoch {i:02}: [{pred}]{' ' * 10}[{truth}]{' ' * 5}{equal}")
 
-    print(f"Accuracy: {accuracy * 100:.2f}%")
-
-
-def train_all_subjects():
-    """
-    Train the model for all subjects and runs.
-
-    Returns:
-        None
-    """
-    subjects = list(range(1, 109))
-    experiments = get_program_config()['experiments']
-
-    average_scores = {}
-    for experiment in experiments:
-        scores = []
-        runs = experiment['runs']
-        experiment_name = experiment['name']
-        for subject in subjects:
-            mean, score = train_subject(subject=subject, runs=runs, save=False)
-            print(f"Experiment: {experiment_name}"
-                  f" -- Subject: {subject:03} "
-                  f"Accuracy = {mean * 100:.2f}%")
-            scores.append(mean)
-
-        average_scores[experiment_name] = np.mean(scores)
-
-    for experiment, mean in average_scores.items():
-        print(f"Experiment: {experiment} "
-              f"Average Accuracy = {mean * 100:.2f}%")
-
-    mean_all_experiments = np.mean(list(average_scores.values()))
-    print(f"Mean Accuracy all experiments: {mean_all_experiments * 100:.2f}%")
+    print(f"{'-' * 36}\nAccuracy: {accuracy_manual * 100:.2f}%")
 
 
 def train_predict(subject: int, run: int, mode: str):
@@ -281,6 +253,53 @@ def train_predict(subject: int, run: int, mode: str):
         print(f"{'-' * 25}\nCross Val Score: {mean * 100:.2f}%")
 
 
+def train_subject_parallel(subject: int, runs: int, experiment_name: str):
+    """
+    Train a subject and return mean accuracy.
+
+    Args:
+        subject (int): The subject number.
+        runs (int): The run number.
+        experiment_name (str): The name of the experiment.
+
+    Returns:
+        float: The mean accuracy of the model.
+    """
+    mean, score = train_subject(subject=subject, runs=runs, save=False)
+    print(f"Experiment: {experiment_name}"
+          f" -- Subject: {subject:03} "
+          f"Accuracy = {mean * 100:.2f}%")
+    return mean
+
+
+def train_all_subjects():
+    """
+    Train the model for all subjects and runs.
+
+    Returns:
+        None
+    """
+    subjects = list(range(1, 5))
+    experiments = get_program_config()['experiments']
+
+    average_scores = {}
+    for experiment in experiments:
+        runs = experiment['runs']
+        experiment_name = experiment['name']
+        with Pool() as pool:
+            scores = pool.starmap(train_subject_parallel,
+                                  product(subjects, [runs], [experiment_name]))
+
+        average_scores[experiment_name] = np.mean(scores)
+
+    for experiment, mean in average_scores.items():
+        print(f"Experiment: {experiment} "
+              f"Average Accuracy = {mean * 100:.2f}%")
+
+    mean_all_experiments = np.mean(list(average_scores.values()))
+    print(f"Mean Accuracy all experiments: {mean_all_experiments * 100:.2f}%")
+
+
 def bci():
     """
     Main function to run the program.
@@ -302,12 +321,15 @@ def bci():
         parser.add_argument('--mode', type=str, required=True)
         args = parser.parse_args()
 
-        subject, run, mode = verify_inputs(args.subject, args.run, args.mode)
-        train_predict(subject, run, mode)
+        subject, run, mode = verify_inputs(
+            subject=args.subject,
+            run=args.run,
+            mode=args.mode)
+        train_predict(subject=subject, run=run, mode=mode)
 
 
 def main():
-    """main function"""
+    """🧠"""
     try:
         bci()
     except Exception as e:

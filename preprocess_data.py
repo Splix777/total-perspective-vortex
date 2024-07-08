@@ -271,7 +271,7 @@ def preprocess_subject(subject: int, runs: list[int], ica: bool) -> RawEDF:
             subject=subject,
             runs=run,
             path='data/',
-            verbose=False
+            verbose=0
         )
         raws = concatenate_raws([
             read_raw_edf(f, preload=True, verbose=False) for f in data
