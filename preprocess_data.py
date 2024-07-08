@@ -275,7 +275,7 @@ def preprocess_subject(subject: int, runs: list[int]) -> RawEDF:
         standardize_channels(raw=raws)
         annotate_raw(raw=raws, run=run)
         filter_raw(raw=raws)
-        # ica_filter(raw=raws)
+        ica_filter(raw=raws)
         re_reference_raw(raw=raws)
         downsample_raw(raw=raws, sfreq=160)
         raws_list.append(raws)

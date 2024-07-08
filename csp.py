@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from scipy import linalg
-from scipy.linalg import eigh
+from itertools import combinations
 
 from preprocess_data import preprocess_data
 
@@ -26,6 +26,7 @@ class CustomCSP(BaseEstimator, TransformerMixin):
     - std: ndarray, shape (n_components,)
         The standard deviation of the transformed data.
     """
+
     def __init__(self, n_components=4):
         self.n_components = n_components
         self.filters = None
@@ -33,109 +34,166 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         self.mean = None
         self.std = None
 
-    def calculate_cov_(self, X, y):
+    def _calculate_cov(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """
+        Calculate the covariance matrices for each class.
+        Covariance matrices are used to calculate the eigenvalues
+        and eigenvectors for each class. In simple terms, the
+        covariance matrix represents the relationship between
+        different channels in the EEG data.
+
+        Args:
+            - X: ndarray, shape (n_epochs, n_channels, n_times)
+                The EEG data.
+            - y: array, shape (n_epochs, )
+                The labels for each epoch.
+
+        Returns:
+            - covs: ndarray, shape (n_classes, n_channels, n_channels)
+                The covariance matrices for each class.
+        """
         n_epochs, n_channels, n_times = X.shape
         self.n_classes = np.unique(y)
         covs = []
 
         for label in self.n_classes:
-            # Select epochs corresponding to the current class label
             epochs_for_label = X[np.where(y == label)]
-            print(
-                f"Label shape (label={label}): {epochs_for_label.shape}")
-
-            # Transpose epochs shape (n_channels, n_epochs_for_label, n_times)
             epochs_for_label = epochs_for_label.transpose([1, 0, 2])
-            print(
-                f"Label shape after transpose: {epochs_for_label.shape}")
-
-            # Reshape epochs shape (n_channels, n_epochs_for_label * n_times)
             epochs_for_label = epochs_for_label.reshape(n_channels, -1)
-            print(
-                f"Label shape after reshape: {epochs_for_label.shape}")
-
-            # Calculate covariance matrix
             cov_matrix = np.cov(epochs_for_label)
-            print(f"Cov Matrix shape: {cov_matrix.shape}")
-
             covs.append(cov_matrix)
 
-        # Convert a list of covariance matrices to a 3D numpy array
-        covs = np.asarray(covs)
-        print(f"covs shape: {covs.shape}")
-        return covs
+        return np.asarray(covs)
 
-    def calculate_eig_(self, covs):
-        eigenvalues, eigenvectors = [], []
-        print(f"Eigenvalues: {eigenvalues}")
-        print(f"Eigenvectors: {eigenvectors}")
+    @staticmethod
+    def _calculate_eig(covs: np.ndarray, regularization_epsilon: float = 1e-6):
+        """
+        Calculate the eigenvalues and eigenvectors for each class
+        to derive Common Spatial Patterns (CSP) filters.
 
-        epsilon = 1e-6
+        In the context of EEG data analysis, CSP filters are used
+        to maximize the variance between two or more classes
+        of brain states or activities, such as
+        'rest', 'left_hand_open', and 'right_hand_open'.
+        Each class is represented by its covariance matrix,
+        which captures the statistical relationship between
+        EEG channels.
 
-        print(f"Covs length: {len(covs)}")
-        for idx, cov in enumerate(covs):
-            for iidx, compCov in enumerate(covs):
-                if idx < iidx:
-                    cov_reg = cov + epsilon * np.eye(cov.shape[0])
-                    compCov_reg = compCov + epsilon * np.eye(compCov.shape[0])
+        Eigenvalues quantify the variance along the directions
+        represented by eigenvectors. In a typical scenario with
+        64 EEG channels and 4 labels
+        (e.g., left hand open, right hand open), there are
+        6 unique combinations of covariance matrices (4 choose 2 = 6).
+        For each combination, this function computes 6 eigenvalues
+        and their corresponding eigenvectors.
 
-                    eigVals, eigVects = linalg.eig(cov_reg, compCov_reg)
+        The use of generalized eigenvalue calculation is unnecessary
+        here, as we are dealing with covariance matrices representing
+        distinct EEG conditions without a need for a second matrix
+        (B) in the form Ax = λBx. Instead, each covariance matrix is
+        regularized with a small epsilon value to ensure numerical
+        stability and avoid singularities.
 
-                    sorted_indices = np.argsort(np.abs(eigVals))[::-1]
+        Args:
+            covs (np.ndarray): Covariance matrices for each class.
+                Shape (n_classes, n_channels, n_channels).
+            regularization_epsilon (float, optional): Small value
+                for regularization to avoid singular matrices.
+                Default is 1e-6.
 
-                    eigenvalues.append(eigVals[sorted_indices])
-                    eigenvectors.append(eigVects[:, sorted_indices])
+        Returns:
+            tuple: Tuple containing:
+                - eigenvalues_list (list of np.ndarray):
+                    List of eigenvalues for each class, sorted
+                    in descending order of importance.
+                - eigenvectors_list (list of np.ndarray):
+                    List of eigenvectors for each class corresponding
+                    to the sorted eigenvalues.
+        """
+        eigenvalues_list = []
+        eigenvectors_list = []
 
-        print(f"Eigenvalues Shape: {len(eigenvalues)}")
-        print(f"Eigenvectors Shape: {len(eigenvectors)}")
-        return eigenvalues, eigenvectors
+        n_classes, n_channels, _ = covs.shape
 
-    def pick_filters(self, eigenvectors):
-        filters = None
+        for idx, iidx in combinations(range(n_classes), 2):
+            cov_regularized = (covs[idx]
+                               + regularization_epsilon
+                               * np.eye(n_channels))
 
-        for EigVects in eigenvectors:
-            print(f"EigVects Shape: {EigVects.shape}")
-            if filters is None:
-                filters = EigVects[:, :self.n_components]
-                print(f"Filters Shape: {filters.shape}")
-            else:
-                print(f"Filters Shape: {filters.shape}")
-                filters = np.concatenate(
-                    [filters, EigVects[:, :self.n_components]], axis=1)
+            values, vectors = np.linalg.eig(cov_regularized)
 
-        # Transpose the filters matrix and store it in the `filters` attribute
-        print(f"Filters Shape: {filters.shape}")
-        print(f"Filters Shape after Transpose: {filters.T.shape}")
-        self.filters = filters.T
+            sorted_indices = np.argsort(np.abs(values))[::-1]
 
-    def transform_epochs(self, X):
-        n_epochs, n_channels, n_times = X.shape
-        print(f"n_epochs: {n_epochs}")
-        print(f"n_channels: {n_channels}")
-        print(f"n_times: {n_times}")
-        n_filters = self.filters.shape[1]
-        print(f"n_filters: {n_filters}")
+            eigenvalues_list.append(values[sorted_indices])
+            eigenvectors_list.append(vectors[:, sorted_indices])
 
-        transformed_data = np.zeros((n_epochs, n_filters, n_times))
-        print(f"Transformed Data Shape: {transformed_data.shape}")
+        return eigenvalues_list, eigenvectors_list
 
+    def pick_filters(self, eigenvectors: list[np.ndarray]):
+        """
+        Pick the CSP filters from the eigenvectors.
+        In simple terms, the CSP filters are the eigenvectors
+        that maximize the variance between two classes.
+        We select the first n_components eigenvectors from
+        each class to extract the CSP filters.
+
+        If we have 64 channels and 4 labels, we will have 6 eigenvalues
+        and eigenvectors for each class. This is because we have 6
+        unique combinations of covariance matrices for 4 labels
+        (4 choose 2 = 6).
+
+        We will end up with 24 eigenvectors (6 * 4) for 4 labels.
+        Shape (n_channels, n_channels) for each class.
+
+        We then concatenate the eigenvectors for each class to get
+        the final CSP filters. Shape (n_channels, n_components).
+
+        Finally, we transpose the filter matrix to get the final
+        shape (n_components, n_channels).
+
+       Args:
+            eigenvectors (list of np.ndarray): A list of
+                eigenvectors for each class.
+
+        Returns:
+            None
+        """
+        self.filters = np.concatenate(
+            [EigVects[:, :self.n_components] for EigVects in eigenvectors],
+            axis=1
+        ).T
+
+    def fit(self, X: np.ndarray, y: np.ndarray):
+        """
+        Fit the CSP algorithm on the input data.
+        The fit step involves calculating the covariance matrices
+        for each class and then deriving the eigenvalues and
+        eigenvectors from the covariance matrices.
+
+        Finally, we select the CSP filters from the eigenvectors.
+
+        Args:
+            X (np.ndarray): The EEG data.
+                Shape (n_epochs, n_channels, n_times).
+            y (np.ndarray): The labels for each epoch.
+                Shape (n_epochs, ).
+
+        Returns:
+            None
+        """
+        covs = self._calculate_cov(X=X, y=y)
+        eigenvalues, eigenvectors = self._calculate_eig(covs=covs)
+        self.pick_filters(eigenvectors)
+
+    def transform_epochs(self, X: np.ndarray):
         X = np.asarray([np.dot(self.filters, epoch) for epoch in X])
         X = (X ** 2).mean(axis=2)
-        print(f"X Shape: {X.shape}")
 
         self.mean = X.mean(axis=0)
         self.std = X.std(axis=0)
 
-    def fit(self, X, y):
-        # Covariance matrices for each class
-        print(f"X Shape: {X.shape}")
-        covs = self.calculate_cov_(X, y)
-        eigenvalues, eigenvectors = self.calculate_eig_(covs)
-
-        self.pick_filters(eigenvectors)
+    def transform(self, X: np.ndarray):
         self.transform_epochs(X)
-
-    def transform(self, X):
         # Transform the input data using the selected CSP filters
         X = np.asarray([np.dot(self.filters, epoch) for epoch in X])
 
@@ -148,26 +206,19 @@ class CustomCSP(BaseEstimator, TransformerMixin):
 
         return X
 
-    def fit_transform(self, X, y):
+    def fit_transform(self, X: np.ndarray, y: np.ndarray = None, **fit_params):
         """
         Fit CSP on input data and transform it.
 
         Parameters:
         - X: ndarray, shape (n_epochs, n_channels, n_times)
             The EEG data.
-        - y: array, shape (n_epochs,)
+        - y: array, shape (n_epochs, )
             The labels for each epoch.
 
         Returns:
         - X_transformed: ndarray, shape (n_epochs, n_components)
             Transformed EEG data using CSP filters.
         """
-        self.fit(X, y)
-        return self.transform(X)
-
-
-if __name__ == '__main__':
-    for X, y in preprocess_data(subjects=[1]):
-        csp = CustomCSP()
-
-    csp.fit(X, y)
+        self.fit(X=X, y=y)
+        return self.transform(X=X)
