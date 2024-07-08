@@ -104,6 +104,7 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
     # csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
     # spoc = SPoC(n_components=15, log=True, reg='oas', rank='full')
     custom_csp = CustomCSP(n_components=16)
+    # preprocessing_methods = [custom_csp, csp, spoc]
     preprocessing_methods = [custom_csp]
 
     pipelines = []
@@ -139,7 +140,12 @@ def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
                 y_train = labels[train_index]
                 pipeline.fit(X_train, y_train)
 
-    return cross_val_score(pipeline, epochs, labels, cv=cv, scoring='accuracy')
+            return cross_val_score(
+                estimator=pipeline,
+                X=epochs,
+                y=labels,
+                cv=cv,
+                scoring='accuracy')
 
 
 def train_subject(subject: int, runs: int | list[int], save: bool = True):
@@ -166,6 +172,7 @@ def train_subject(subject: int, runs: int | list[int], save: bool = True):
     )
 
     pipelines = create_pipelines()
+
     for pipeline_name, pipeline in pipelines:
         score = train_model(epochs, labels, pipeline)
         mean_score = np.mean(score)
@@ -268,8 +275,11 @@ def train_subject_parallel(subject: int, runs: int, experiment_name: str):
         float: The mean accuracy of the model.
     """
     mean, score = train_subject(subject=subject, runs=runs, save=False)
-    print(f"Experiment: {experiment_name}"
-          f" -- Subject: {subject:03} "
+
+    max_experiment_name_length = 30
+    experiment_name = experiment_name.replace('_', ' ').title()
+    print(f"Experiment: {experiment_name:{max_experiment_name_length}}"
+          f"| Subject: {subject:03} "
           f"Accuracy = {mean * 100:.2f}%")
     return mean
 
@@ -282,24 +292,26 @@ def train_all_subjects():
         None
     """
     # For testing, we won't use all 109 subjects
-    subjects = list(range(1, 5))
+    subjects = list(range(1, 3))
     experiments = get_program_config()['experiments']
 
     average_scores = {}
     for experiment in experiments:
         runs = experiment['runs']
         experiment_name = experiment['name']
-        with Pool() as pool:
-            scores = pool.starmap(train_subject_parallel,
-                                  product(subjects, [runs], [experiment_name]))
-
+        scores = [train_subject_parallel(subject, runs, experiment_name)
+                  for subject in subjects]
         average_scores[experiment_name] = np.mean(scores)
 
+    print(f"{'-' * 50}")
     for experiment, mean in average_scores.items():
-        print(f"Experiment: {experiment} "
-              f"Average Accuracy = {mean * 100:.2f}%")
+        max_experiment_name_length = 30
+        experiment_name = experiment.replace('_', ' ').title()
+        print(f"Experiment: {experiment_name:{max_experiment_name_length}} "
+              f"| Average Accuracy = {mean * 100:.2f}%")
 
     mean_all_experiments = np.mean(list(average_scores.values()))
+    print(f"{'-' * 50}")
     print(f"Mean Accuracy all experiments: {mean_all_experiments * 100:.2f}%")
 
 
@@ -335,8 +347,14 @@ def main():
     """🧠"""
     try:
         bci()
+
+    except KeyboardInterrupt:
+        print('Program terminated by user')
+        sys.exit(1)
     except Exception as e:
-        print(f'Error: {e}')
+        import traceback
+        error_function = traceback.extract_tb(e.__traceback__)[-1].name
+        print(f'Error in function `{error_function}`: {e}')
 
 
 if __name__ == '__main__':
