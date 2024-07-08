@@ -1,9 +1,6 @@
 import numpy as np
-from sklearn.base import BaseEstimator, TransformerMixin
-from scipy import linalg
 from itertools import combinations
-
-from preprocess_data import preprocess_data
+from sklearn.base import BaseEstimator, TransformerMixin
 
 
 class CustomCSP(BaseEstimator, TransformerMixin):
@@ -26,15 +23,14 @@ class CustomCSP(BaseEstimator, TransformerMixin):
     - std: ndarray, shape (n_components,)
         The standard deviation of the transformed data.
     """
-
     def __init__(self, n_components=4):
         self.n_components = n_components
         self.filters = None
-        self.n_classes = None
         self.mean = None
         self.std = None
 
-    def _calculate_cov(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _calculate_cov(X: np.ndarray, y: np.ndarray) -> np.ndarray:
         """
         Calculate the covariance matrices for each class.
         Covariance matrices are used to calculate the eigenvalues
@@ -53,17 +49,16 @@ class CustomCSP(BaseEstimator, TransformerMixin):
                 The covariance matrices for each class.
         """
         n_epochs, n_channels, n_times = X.shape
-        self.n_classes = np.unique(y)
+        unique_classes = np.unique(y)
         covs = []
 
-        for label in self.n_classes:
-            epochs_for_label = X[np.where(y == label)]
-            epochs_for_label = epochs_for_label.transpose([1, 0, 2])
-            epochs_for_label = epochs_for_label.reshape(n_channels, -1)
-            cov_matrix = np.cov(epochs_for_label)
+        for label in unique_classes:
+            epochs_label = X[y == label]
+            reshaped = epochs_label.transpose(1, 0, 2).reshape(n_channels, -1)
+            cov_matrix = np.cov(reshaped)
             covs.append(cov_matrix)
 
-        return np.asarray(covs)
+        return np.array(covs)
 
     @staticmethod
     def _calculate_eig(covs: np.ndarray, regularization_epsilon: float = 1e-6):
@@ -159,7 +154,7 @@ class CustomCSP(BaseEstimator, TransformerMixin):
             None
         """
         self.filters = np.concatenate(
-            [EigVects[:, :self.n_components] for EigVects in eigenvectors],
+            [vectors[:, :self.n_components] for vectors in eigenvectors],
             axis=1
         ).T
 
@@ -186,6 +181,29 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         self.pick_filters(eigenvectors)
 
     def transform_epochs(self, X: np.ndarray):
+        """
+        Transform the input data using the CSP filters.
+        The transformation step involves projecting the EEG data
+        onto the CSP filters to extract features that are
+        discriminative for a given classification task.
+
+        Input shape (n_epochs, n_channels, n_times). Is
+        transformed to (n_epochs, n_components). This
+        transformation is achieved by multiplying the CSP
+        filters with the EEG data.
+
+        The purpose of this method is to calculate the mean
+        and standard deviation of the transformed data. The
+        mean and standard deviation are used to standardize
+        the features in the transform method.
+
+        Args:
+            X (np.ndarray): The EEG data.
+                Shape (n_epochs, n_channels, n_times).
+
+        Returns:
+            None
+        """
         X = np.asarray([np.dot(self.filters, epoch) for epoch in X])
         X = (X ** 2).mean(axis=2)
 
@@ -193,8 +211,30 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         self.std = X.std(axis=0)
 
     def transform(self, X: np.ndarray):
+        """
+        Transform the input data using the CSP filters.
+        The transformation step involves projecting the EEG data
+        onto the CSP filters to extract features that are
+        discriminative for a given classification task.
+
+        After passing through transform epochs, the data is
+        of shape (n_epochs, n_components). We then standardize
+        we use np.dot to multiply the CSP filters with the
+        transformed data.
+
+        We then square and average along the time axis. X is now
+        shape (n_epochs, n_components). We standardize the features
+        by subtracting the mean and dividing by the standard deviation.
+
+        Args:
+            X (np.ndarray): The EEG data.
+                Shape (n_epochs, n_channels, n_times).
+
+        Returns:
+            X (np.ndarray): The transformed EEG data using CSP filters.
+                Shape (n_epochs, n_components).
+        """
         self.transform_epochs(X)
-        # Transform the input data using the selected CSP filters
         X = np.asarray([np.dot(self.filters, epoch) for epoch in X])
 
         # Square and average along the time axis
@@ -210,15 +250,31 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         """
         Fit CSP on input data and transform it.
 
-        Parameters:
-        - X: ndarray, shape (n_epochs, n_channels, n_times)
-            The EEG data.
-        - y: array, shape (n_epochs, )
-            The labels for each epoch.
+        Args:
+            - X: ndarray, shape (n_epochs, n_channels, n_times)
+                The EEG data.
+            - y: array, shape (n_epochs, )
+                The labels for each epoch.
 
         Returns:
-        - X_transformed: ndarray, shape (n_epochs, n_components)
-            Transformed EEG data using CSP filters.
+            - X_transformed: ndarray, shape (n_epochs, n_components)
+                Transformed EEG data using CSP filters.
+
+        Raises:
+            - TypeError: If X is not a numpy array.
+            - ValueError: If X is not a 3D array.
         """
-        self.fit(X=X, y=y)
-        return self.transform(X=X)
+        if not isinstance(X, np.ndarray):
+            raise TypeError("Expected 'X' to be a numpy array.")
+        if X.ndim != 3:
+            raise ValueError(
+                "'X' to be a 3D array shape (n_epochs, n_channels, n_times).")
+        if not isinstance(y, np.ndarray):
+            raise TypeError("Expected 'y' to be a numpy array.")
+
+        try:
+            self.fit(X=X, y=y)
+            return self.transform(X=X)
+
+        except Exception as e:
+            raise e
