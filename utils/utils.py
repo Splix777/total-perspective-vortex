@@ -1,5 +1,4 @@
 import json
-import sys
 
 
 def get_program_config(config_path: str = 'config.json'):
@@ -114,18 +113,10 @@ def verify_inputs(subject: int, run: int, mode: str):
     Raises:
         ValueError: If the subject, run, or mode are not valid.
     """
-    try:
-        subject = subject
-        run = run
-        if subject < 1 or subject > 109:
-            raise ValueError('Subject must be between 1 and 109')
-        if run < 3 or run > 14:
-            raise ValueError('Run must be between 3 and 14')
-    except ValueError as e:
-        print(f'Invalid input: {e}')
-        sys.exit(1)
-
+    if subject < 1 or subject > 109:
+        raise ValueError('Subject must be between 1 and 109')
+    if run < 3 or run > 14:
+        raise ValueError('Run must be between 3 and 14')
     if mode in {'train', 'predict'}:
         return subject, run, mode
-    print('Mode must be either "train" or "predict"')
-    sys.exit(1)
+    raise ValueError('Mode must be either "train" or "predict"')

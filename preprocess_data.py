@@ -8,7 +8,8 @@ from mne import events_from_annotations
 from mne.channels import make_standard_montage
 from mne import concatenate_raws, Epochs, annotations_from_events, pick_types
 
-from utils import get_experiment_name
+from utils.utils import get_experiment_name
+from utils.decorators import time_limit
 
 
 def event_description(run: int) -> dict:
@@ -40,6 +41,7 @@ def event_description(run: int) -> dict:
         raise ValueError(f'Invalid run {run}')
 
 
+@time_limit(limit=10)
 def ica_filter(raw: RawEDF):
     """
     Independent Component Analysis (ICA) is used to remove
@@ -242,7 +244,7 @@ def annotate_raw(raw: RawEDF, run: int):
     return raw
 
 
-def preprocess_subject(subject: int, runs: list[int]) -> RawEDF:
+def preprocess_subject(subject: int, runs: list[int], ica: bool) -> RawEDF:
     """
     Pre-processing sequence for the raw data. The function loads
     the raw data, standardizes the channels, annotates the data,
@@ -256,6 +258,8 @@ def preprocess_subject(subject: int, runs: list[int]) -> RawEDF:
     Args:
         subject (int): The subject number.
         runs (list[int]): List of run numbers.
+        ica (bool): Whether to apply Independent Component Analysis
+            (ICA) to the raw data.
 
     Returns:
         RawEDF: The pre-processed raw data for all
@@ -275,7 +279,8 @@ def preprocess_subject(subject: int, runs: list[int]) -> RawEDF:
         standardize_channels(raw=raws)
         annotate_raw(raw=raws, run=run)
         filter_raw(raw=raws)
-        ica_filter(raw=raws)
+        if ica:
+            ica_filter(raw=raws)
         re_reference_raw(raw=raws)
         downsample_raw(raw=raws, sfreq=160)
         raws_list.append(raws)
@@ -344,7 +349,7 @@ def extract_features(epochs: Epochs) -> tuple[np.ndarray, np.ndarray]:
     return features, labels
 
 
-def preprocess_data(subject: int, runs: list[int]) -> tuple:
+def preprocess_data(subject: int, runs: list[int], ica: bool) -> tuple:
     """
     Pre-processes the data for the specified subjects and runs.
     The pre-processing steps include loading the raw data,
@@ -365,17 +370,16 @@ def preprocess_data(subject: int, runs: list[int]) -> tuple:
     Args:
         subject (int): The subject number.
         runs (list[int]): List of run numbers.
+        ica (bool): Whether to apply Independent Component Analysis
+            (ICA) to the raw data.
 
     Returns:
         tuple[np.ndarray, np.ndarray]: A tuple containing the
             features and labels extracted from the epochs.
     """
     try:
-        raw = preprocess_subject(subject=subject, runs=runs)
+        raw = preprocess_subject(subject=subject, runs=runs, ica=ica)
         return extract_features(epochs=create_epochs(raw=raw))
 
-    except (ValueError, FileNotFoundError) as e:
-        print(f'Error: {e}')
     except Exception as e:
-        print(f'An error occurred: {e}')
-    return None, None
+        raise e

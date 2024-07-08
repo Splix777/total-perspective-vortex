@@ -237,10 +237,8 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         self.transform_epochs(X)
         X = np.asarray([np.dot(self.filters, epoch) for epoch in X])
 
-        # Square and average along the time axis
         X = (X ** 2).mean(axis=2)
 
-        # Standardize features
         X -= self.mean
         X /= self.std
 

@@ -20,7 +20,7 @@ from sklearn.model_selection import cross_val_score, train_test_split
 
 from csp import CustomCSP
 from preprocess_data import preprocess_data
-from utils import get_program_config, get_experiment_name, verify_inputs
+from utils.utils import get_program_config, get_experiment_name, verify_inputs
 
 
 def save_model(directory: str, file: str, model: Pipeline, score: float):
@@ -47,7 +47,7 @@ def save_model(directory: str, file: str, model: Pipeline, score: float):
         f.write(f'{final_score}')
 
 
-def load_model(directory: str, file: str) -> Pipeline:
+def load_model(directory: str, file: str) -> Pipeline | None:
     """
     Load a model from a file in the specified directory.
 
@@ -56,10 +56,16 @@ def load_model(directory: str, file: str) -> Pipeline:
         file (str): The name of the file to load the model from.
 
     Returns:
-        Pipeline: The model loaded from the file.
+        Pipeline | None: The model if it exists, otherwise None.
     """
-    with open(f'{directory}/{file}.pkl', 'rb') as f:
-        return pickle.load(f)
+    try:
+        with open(f'{directory}/{file}.pkl', 'rb') as f:
+            return pickle.load(f)
+
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        raise ValueError(f'Error loading model: {e}') from e
 
 
 def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
@@ -68,33 +74,22 @@ def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
     average accuracy score.
 
     Args:
-        epochs (np.ndarray): The epochs data.
-        labels (np.ndarray): The labels data.
+        epochs (np.ndarray): The epoch data.
+        labels (np.ndarray): The labels' data.
         pipeline (Pipeline): The pipeline to train.
 
     Returns:
-        float: The average accuracy score.
+        np.ndarray: The accuracy scores for each fold.
     """
     cv = ShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
-    scores = []
+    with open(os.devnull, 'w') as fnull:
+        with contextlib.redirect_stdout(fnull):
+            for train_index, test_index in cv.split(epochs):
+                X_train = epochs[train_index]
+                y_train = labels[train_index]
+                pipeline.fit(X_train, y_train)
 
-    # with open(os.devnull, 'w') as fnull:
-    #     with contextlib.redirect_stdout(fnull):
-    for train_index, test_index in cv.split(epochs):
-        X_train = epochs[train_index]
-        y_train = labels[train_index]
-        pipeline.fit(X_train, y_train)
-
-    score = cross_val_score(
-        pipeline,
-        epochs,
-        labels,
-        cv=cv,
-        scoring='accuracy'
-    )
-    scores.append(score)
-
-    return np.mean(scores)
+    return cross_val_score(pipeline, epochs, labels, cv=cv, scoring='accuracy')
 
 
 def create_pipelines() -> list[tuple[str, Pipeline]]:
@@ -142,41 +137,46 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
     return pipelines
 
 
-def train_subject(subject: int, runs: int | list[int]):
+def train_subject(subject: int, runs: int | list[int], save: bool = True):
     """
     Train the model for a given subject and run(s).
 
     Args:
         subject (int): The subject number.
         runs (int) | (list[int]): The run number(s).
+        save (bool): Whether to save the data
 
     Returns:
-        float: The average accuracy score.
+        None
     """
     experiment_name = get_experiment_name(runs)
 
-    best_score = -np.inf
+    best_mean = -np.inf
     best_pipeline = None
+    best_score = None
 
     epochs, labels = preprocess_data(
         runs=[runs] if isinstance(runs, int)
-        else runs, subject=subject
-
+        else runs, subject=subject, ica=True
     )
+
     pipelines = create_pipelines()
     for pipeline_name, pipeline in pipelines:
         score = train_model(epochs, labels, pipeline)
-        if score > best_score:
-            best_score = score
+        mean_score = np.mean(score)
+        if mean_score > best_mean:
+            best_mean = mean_score
             best_pipeline = pipeline
+            best_score = score
 
-    save_model(
-        directory='models',
-        file=f'subject_{subject}_{experiment_name}',
-        model=best_pipeline,
-        score=best_score)
+    if save:
+        save_model(
+            directory='models',
+            file=f'subject_{subject}_{experiment_name}',
+            model=best_pipeline,
+            score=best_mean)
 
-    return best_score
+    return best_mean, best_score
 
 
 def predict_subject(subject: int, run: int):
@@ -197,9 +197,16 @@ def predict_subject(subject: int, run: int):
         file=f'subject_{subject}_{experiment_name}')
 
     if model is None:
-        raise ValueError(f'Model not found: subject {subject} and run {run}')
+        print(f'Model not found: subject {subject} and run {run}')
+        response = input('Would you like to train the model? (y/n): ')
+        if response.lower() != 'y':
+            return
+        train_subject(subject, run)
+        model = load_model(
+            directory='models',
+            file=f'subject_{subject}_{experiment_name}')
 
-    epochs, labels = preprocess_data(subject=subject, runs=[run])
+    epochs, labels = preprocess_data(subject=subject, runs=[run], ica=True)
 
     X_train, X_test, y_train, y_test = train_test_split(
         epochs,
@@ -207,7 +214,6 @@ def predict_subject(subject: int, run: int):
         test_size=0.2,
         random_state=42)
 
-    # Evaluate the model on the unseen test set
     predictions = model.predict(X_test)
     accuracy = model.score(X_test, y_test)
 
@@ -216,7 +222,7 @@ def predict_subject(subject: int, run: int):
         equal = pred == truth
         print(f"epoch {i:02}: [{pred}] [{truth}] {equal}")
 
-    print(f"Accuracy: {accuracy:.4f}")
+    print(f"Accuracy: {accuracy * 100:.2f}%")
 
 
 def train_all_subjects():
@@ -226,33 +232,32 @@ def train_all_subjects():
     Returns:
         None
     """
-    subjects = list(range(1, 5))
-    config = get_program_config()
-    experiments = config['experiments']
+    subjects = list(range(1, 109))
+    experiments = get_program_config()['experiments']
 
     average_scores = {}
     for experiment in experiments:
-        run = experiment['runs']
         scores = []
+        runs = experiment['runs']
         experiment_name = experiment['name']
         for subject in subjects:
-            score = train_subject(subject, run)
+            mean, score = train_subject(subject=subject, runs=runs, save=False)
             print(f"Experiment: {experiment_name}"
-                  f" -- Subject: {subject} "
-                  f"Accuracy = {score * 100:.2f}%")
-            scores.append(score)
+                  f" -- Subject: {subject:03} "
+                  f"Accuracy = {mean * 100:.2f}%")
+            scores.append(mean)
 
         average_scores[experiment_name] = np.mean(scores)
 
-    for experiment, score in average_scores.items():
+    for experiment, mean in average_scores.items():
         print(f"Experiment: {experiment} "
-              f"Average Accuracy = {score * 100:.2f}%")
+              f"Average Accuracy = {mean * 100:.2f}%")
 
     mean_all_experiments = np.mean(list(average_scores.values()))
     print(f"Mean Accuracy all experiments: {mean_all_experiments * 100:.2f}%")
 
 
-def bci(subject: int, run: int, mode: str):
+def train_predict(subject: int, run: int, mode: str):
     """
     Train or predict the model for a given subject and run.
 
@@ -270,13 +275,13 @@ def bci(subject: int, run: int, mode: str):
     if mode == 'predict':
         predict_subject(subject, run)
     elif mode == 'train':
-        score = train_subject(subject=subject, runs=run)
-        print(f"Cross Val Score: {score * 100:.2f}%")
-    else:
-        raise ValueError('Mode must be either "train" or "predict"')
+        mean, scores = train_subject(subject=subject, runs=run)
+        for i, score in enumerate(scores):
+            print(f"Fold {i + 1} Accuracy: {score * 100:.2f}%")
+        print(f"{'-' * 25}\nCross Val Score: {mean * 100:.2f}%")
 
 
-def main():
+def bci():
     """
     Main function to run the program.
 
@@ -298,7 +303,15 @@ def main():
         args = parser.parse_args()
 
         subject, run, mode = verify_inputs(args.subject, args.run, args.mode)
-        bci(subject, run, mode)
+        train_predict(subject, run, mode)
+
+
+def main():
+    """main function"""
+    try:
+        bci()
+    except Exception as e:
+        print(f'Error: {e}')
 
 
 if __name__ == '__main__':
