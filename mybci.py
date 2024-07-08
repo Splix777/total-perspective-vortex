@@ -286,3 +286,7 @@ def main():
 
     subject, run, mode = verify_inputs(args.subject, args.run, args.mode)
     bci(subject, run, mode)
+
+
+if __name__ == '__main__':
+    main()
