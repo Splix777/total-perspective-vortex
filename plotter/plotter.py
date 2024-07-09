@@ -11,15 +11,8 @@ use('TkAgg')
 
 
 class Plotter:
-    def __init__(self, plot_enabled=True):
-        self.plot_enabled = plot_enabled
-
-    def enable_plot(self, func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if self.plot_enabled:
-                func(*args, **kwargs)
-        return wrapper
+    def __init__(self):
+        pass
 
     @staticmethod
     def plot_raw_data(raw):

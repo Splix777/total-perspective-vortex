@@ -1,5 +1,7 @@
 import numpy as np
 
+from dataclasses import dataclass, field, InitVar
+
 from mne.preprocessing import ICA
 from mne.io import read_raw_edf
 from mne.datasets import eegbci
@@ -13,416 +15,391 @@ from utils.decorators import time_limit
 from plotter.plotter import Plotter
 
 
-def event_description(run: int) -> dict:
-    """
-    Returns a dictionary mapping integers to descriptions
-    based on the experiment type.
+@dataclass
+class EEGProcessor:
+    subject: int
+    runs: list[int]
+    ica: bool
+    plot: bool
+    plotter: Plotter = field(init=False)
+    raw: RawEDF = field(init=False, default=None)
+    epochs: Epochs = field(init=False, default=None)
+    features: np.ndarray = field(init=False, default=None)
+    labels: np.ndarray = field(init=False, default=None)
 
-    Args:
-        run (int): The run number.
+    def __post_init__(self):
+        if self.plot:
+            self.plotter = Plotter()
+        self.preprocess_data()
 
-    Returns:
-        dict: A dictionary mapping integers to descriptions
-            based on the experiment type.
+    def _event_description(self) -> dict:
+        """
+        Returns a dictionary mapping integers to descriptions
+        based on the experiment type.
 
-    Raises:
-        ValueError: If the run is invalid.
-    """
-    experiment = get_experiment_name(run=run)
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
 
-    if experiment == 'left_right_fist':
-        return {1: 'bads', 2: 'real_left', 3: 'real_right'}
-    elif experiment == 'imagine_left_right_fist':
-        return {1: 'bads', 2: 'imaginary_left', 3: 'imaginary_right'}
-    elif experiment == 'fists_feet':
-        return {1: 'bads', 2: 'real_fists', 3: 'real_feet'}
-    elif experiment == 'imagine_fists_feet':
-        return {1: 'bads', 2: 'imaginary_fists', 3: 'imaginary_feet'}
-    else:
-        raise ValueError(f'Invalid run {run}')
+        Returns:
+            dict: A dictionary mapping integers to descriptions
+                based on the experiment type.
 
+        Raises:
+            ValueError: If the run is invalid.
+        """
+        experiment = get_experiment_name(run=self.runs)
 
-@time_limit(limit=10)
-def ica_filter(raw: RawEDF):
-    """
-    Independent Component Analysis (ICA) is used to remove
-    eye movement artifacts from the raw data. The function
-    fits the ICA model to the raw data and identifies
-    components that are likely to be eye movements. These
-    components are then removed from the raw data.
+        if experiment == 'left_right_fist':
+            return {1: 'bads', 2: 'real_left', 3: 'real_right'}
+        elif experiment == 'imagine_left_right_fist':
+            return {1: 'bads', 2: 'imaginary_left', 3: 'imaginary_right'}
+        elif experiment == 'fists_feet':
+            return {1: 'bads', 2: 'real_fists', 3: 'real_feet'}
+        elif experiment == 'imagine_fists_feet':
+            return {1: 'bads', 2: 'imaginary_fists', 3: 'imaginary_feet'}
+        else:
+            raise ValueError(f'Invalid run {self.runs}')
 
-    Susceptible channels are identified based on the
-    following criteria:
-        - Fp1, Fp2, Fz, F4, F8, Fpz
+    @time_limit(limit=10)
+    def _ica_filter(self):
+        """
+        Independent Component Analysis (ICA) is used to remove
+        eye movement artifacts from the raw data. The function
+        fits the ICA model to the raw data and identifies
+        components that are likely to be eye movements. These
+        components are then removed from the raw data.
 
-    These channels are located near the eyes and are
-    likely to be affected by eye movements. Channels
-    not close to the eyes are also susceptible to
-    eye movement artifacts, but the above channels
-    are the most likely to be affected.
+        Susceptible channels are identified based on the
+        following criteria:
+            - Fp1, Fp2, Fz, F4, F8, Fpz
 
-    Args:
-        raw (RawEDF): The raw data to filter.
+        These channels are located near the eyes and are
+        likely to be affected by eye movements. Channels
+        not close to the eyes are also susceptible to
+        eye movement artifacts, but the above channels
+        are the most likely to be affected.
 
-    Returns:
-        None
-    """
-    ica = ICA(
-        n_components=20,
-        max_iter=10_000,
-        method='fastica',
-        random_state=42,
-        verbose=False
-    )
-    ica.fit(inst=raw, verbose=False)
+        Modifies the raw data in-place by applying the ICA
+        model to the raw data and removing the identified
+        eye movement components.
 
-    eog_susceptible_channels = ['Fp1', 'Fp2', 'Fz', 'F4', 'F8', 'Fpz']
-    for channel in eog_susceptible_channels:
-        eog_indices, eog_scores = ica.find_bads_eog(
-            inst=raw,
-            ch_name=channel,
-            threshold='auto',
-            l_freq=1,
-            h_freq=7,
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
+
+        Returns:
+            None
+        """
+        ica = ICA(
+            n_components=20,
+            max_iter=10_000,
+            method='fastica',
+            random_state=42,
             verbose=False
         )
-        ica.exclude.extend(eog_indices)
+        ica.fit(inst=self.raw, verbose=False)
 
-    ica.apply(inst=raw, exclude=ica.exclude, verbose=False)
+        eog_susceptible_channels = ['Fp1', 'Fp2', 'Fz', 'F4', 'F8', 'Fpz']
+        for channel in eog_susceptible_channels:
+            eog_indices, eog_scores = ica.find_bads_eog(
+                inst=self.raw,
+                ch_name=channel,
+                threshold='auto',
+                l_freq=8,
+                h_freq=30,
+                verbose=False
+            )
+            ica.exclude.extend(eog_indices)
 
+        ica.apply(inst=self.raw, exclude=ica.exclude, verbose=False)
 
-def filter_raw(raw: RawEDF):
-    """
-    Applies notch filter of 60 Hz. Notch filters are used
-    to eliminate power line noise from the raw data. Common
-    power line frequencies include 50 Hz and 60 Hz. Depends
-    on the country of origin. Method 'iir' (Infinite Impulse
-    Response) is used to apply the notch filter. Its digital
-    filter that can achieve a sharper cutoff than FIR filters.
-    Our recordings were done by PhysioNet Located in Cambridge,
-    Massachusetts, USA. So, we use 60 Hz as the power line
-    frequency.
+    def _filter_raw(self):
+        """
+        Applies notch filter of 60 Hz. Notch filters are used
+        to eliminate power line noise from the raw data. Common
+        power line frequencies include 50 Hz and 60 Hz. Depends
+        on the country of origin. Method 'iir' (Infinite Impulse
+        Response) is used to apply the notch filter. Its digital
+        filter that can achieve a sharper cutoff than FIR filters.
+        Our recordings were done by PhysioNet Located in Cambridge,
+        Massachusetts, USA. So, we use 60 Hz as the power line
+        frequency.
 
-    Applies bandpass filter between 8 Hz and 30 Hz. Bandpass
-    filters are used to remove unwanted frequencies from the
-    raw data. The lower cutoff frequency is 8 Hz, and the upper
-    cutoff frequency is 30 Hz. The FIR filter design is used
-    to apply the bandpass filter. The 'firwin' design is used
-    to design the filter coefficients. The 'skip_by_annotation'
-    parameter is set to 'edge' to avoid filtering the data
-    near the edges of the raw data.
+        Applies bandpass filter between 8 Hz and 30 Hz. Bandpass
+        filters are used to remove unwanted frequencies from the
+        raw data. The lower cutoff frequency is 8 Hz, and the upper
+        cutoff frequency is 30 Hz. The FIR filter design is used
+        to apply the bandpass filter. The 'firwin' design is used
+        to design the filter coefficients. The 'skip_by_annotation'
+        parameter is set to 'edge' to avoid filtering the data
+        near the edges of the raw data.
 
-    Args:
-        raw (RawEDF): The raw data to be filtered.
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
 
-    Returns:
-        None
-    """
-    raw.notch_filter(60, method="iir", verbose=False)
-    raw.filter(
-        l_freq=8,
-        h_freq=30,
-        fir_design='firwin',
-        skip_by_annotation='edge',
-        verbose=False
-    )
+        Returns:
+            None
+        """
+        self.raw.notch_filter(60, method="iir", verbose=False)
+        self.raw.filter(
+            l_freq=8,
+            h_freq=30,
+            fir_design='firwin',
+            skip_by_annotation='edge',
+            verbose=False
+        )
 
+    def _re_reference_raw(self):
+        """
+        Re-references the raw data to the average reference.
+        Its process of recalculating the EEG signal by
+        subtracting the average of all electrodes from each
+        individual electrode. This process is used to remove
+        common noise sources from the raw data.
 
-def re_reference_raw(raw: RawEDF):
-    """
-    Re-references the raw data to the average reference.
-    Its process of recalculating the EEG signal by
-    subtracting the average of all electrodes from each
-    individual electrode. This process is used to remove
-    common noise sources from the raw data.
+        Each channel's signal will be recalculated as the
+        difference from mean signal of all channels. This helps
+        balance out common noise sources across all channels.
 
-    Each channel's signal will be recalculated as the
-    difference from mean signal of all channels. This helps
-    balance out common noise sources across all channels.
+        Projection parameter is set to True to apply the
+        projection vectors to the raw data. This is used to
+        remove artifacts from the raw data.
 
-    Projection parameter is set to True to apply the
-    projection vectors to the raw data. This is used to
-    remove artifacts from the raw data.
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
 
-    Args:
-        raw (RawEDF): The raw data to re-reference.
+        Returns:
+            None
+        """
+        self.raw.set_eeg_reference(
+            ref_channels='average',
+            projection=True,
+            verbose=False
+        )
+        self.raw.apply_proj(verbose=False)
 
-    Returns:
-        None
-    """
-    raw.set_eeg_reference(
-        ref_channels='average',
-        projection=True,
-        verbose=False
-    )
-    raw.apply_proj(verbose=False)
+    def _downsample_raw(self, sfreq):
+        """
+        Down samples the raw data to the specified sampling
+        frequency. This means recording fewer data points
+        per second, which can help reduce the computational
+        cost of processing the data. The 'auto' parameter
+        is used to automatically determine the number of
+        points to pad the data with before resampling.
 
+        npad: helps mitigate the edge effects that can occur
+        when resampling the data. These edge effects can
+        cause distortions in the data, so padding the data
+        can help reduce these distortions.
 
-def downsample_raw(raw, sfreq):
-    """
-    Down samples the raw data to the specified sampling
-    frequency. This means recording fewer data points
-    per second, which can help reduce the computational
-    cost of processing the data. The 'auto' parameter
-    is used to automatically determine the number of
-    points to pad the data with before resampling.
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
+            sfreq (int): The sampling frequency to downsample to.
 
-    npad: helps mitigate the edge effects that can occur
-    when resampling the data. These edge effects can
-    cause distortions in the data, so padding the data
-    can help reduce these distortions.
+        Returns:
+            None
+        """
+        self.raw.resample(sfreq, npad="auto", verbose=False)
 
-    Args:
-        raw (RawEDF): The raw data to downsample.
-        sfreq (int): The sampling frequency to downsample to.
+    def _standardize_channels(self):
+        """
+        Standardizes the raw data by applying the standard
+        10-20 electrode system. This system is used to
+        standardize the placement of electrodes on the
+        scalp. The 10-20 system is used to ensure that
+        electrodes are placed at consistent locations
+        across different subjects. Our data is recorded
+        using the 10-10 system. Since there is no '10-10'
+        montage available in MNE-Python, we use the
+        closest available montage, which is the standard
+        10-20 system.
 
-    Returns:
-        None
-    """
-    raw.resample(sfreq, npad="auto", verbose=False)
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
 
+        Returns:
+            None
+        """
+        eegbci.standardize(self.raw)
+        self.raw.set_montage(
+            montage=make_standard_montage('standard_1020'),
+            verbose=False
+        )
 
-def standardize_channels(raw: RawEDF):
-    """
-    Standardizes the raw data by applying the standard
-    10-20 electrode system. This system is used to
-    standardize the placement of electrodes on the
-    scalp. The 10-20 system is used to ensure that
-    electrodes are placed at consistent locations
-    across different subjects. Our data is recorded
-    using the 10-10 system. Since there is no '10-10'
-    montage available in MNE-Python, we use the
-    closest available montage, which is the standard
-    10-20 system.
+    def _annotate_raw(self):
+        """
+        Annotates the raw data based on the event descriptions
+        provided by the event_description function. The event
+        descriptions are used to label the raw data with
+        descriptions of the events that occurred during the
+        recording. The annotations are used to mark the start
+        and end times of each event in the raw data.
 
-    Args:
-        raw (RawEDF): The raw data to standardize.
+        This allows us to differentiate between different
+        experimental conditions and identify when each
+        condition occurred during the recording.
 
-    Returns:
-        None
-    """
-    eegbci.standardize(raw)
-    raw.set_montage(
-        montage=make_standard_montage('standard_1020'),
-        verbose=False
-    )
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
 
+        Returns:
+            None
+        """
+        events, _ = events_from_annotations(
+            raw=self.raw,
+            event_id=dict(T0=1, T1=2, T2=3),
+            verbose=False
+        )
+        annotations = annotations_from_events(
+            events=events,
+            event_desc=self._event_description(),
+            sfreq=self.raw.info['sfreq'],
+            orig_time=self.raw.info['meas_date'],
+            verbose=False
+        )
 
-def annotate_raw(raw: RawEDF, run: int):
-    """
-    Annotates the raw data based on the event descriptions
-    provided by the event_description function. The event
-    descriptions are used to label the raw data with
-    descriptions of the events that occurred during the
-    recording. The annotations are used to mark the start
-    and end times of each event in the raw data.
+        self.raw.set_annotations(annotations=annotations, verbose=False)
 
-    This allows us to differentiate between different
-    experimental conditions and identify when each
-    condition occurred during the recording.
+    def _process(self, data: list):
+        """
+        Pre-processing sequence for the raw data. The function loads
+        the raw data, standardizes the channels, annotates the data,
+        filters the data, applies Independent Component Analysis (ICA),
+        re-references the data, and down-samples the data.
 
-    Args:
-        raw (RawEDF): The raw data to annotate.
-        run (int): The run number.
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
+            data (RawEDF): The raw data to process.
 
-    Returns:
-        RawEDF: The annotated raw data.
-    """
-    events, _ = events_from_annotations(
-        raw=raw,
-        event_id=dict(T0=1, T1=2, T2=3),
-        verbose=False
-    )
-    annotations = annotations_from_events(
-        events=events,
-        event_desc=event_description(run=run),
-        sfreq=raw.info['sfreq'],
-        orig_time=raw.info['meas_date'],
-        verbose=False
-    )
+        Returns:
+            None
+        """
 
-    raw.set_annotations(annotations=annotations, verbose=False)
-    return raw
+        self.raw = concatenate_raws([
+            read_raw_edf(f, preload=True, verbose=False) for f in data
+        ])
 
+        self._standardize_channels()
+        self._annotate_raw()
+        self._filter_raw()
+        if self.ica:
+            self._ica_filter()
+        self._re_reference_raw()
+        self._downsample_raw(sfreq=160)
 
-def process(data: list, run: int, ica: bool, plot: bool):
-    """
-    Pre-processing sequence for the raw data. The function loads
-    the raw data, standardizes the channels, annotates the data,
-    filters the data, applies Independent Component Analysis (ICA),
-    re-references the data, and down-samples the data.
+    def _preprocess_subject(self):
+        """
+        Pre-processing sequence for the raw data. The function loads
+        the raw data, standardizes the channels, annotates the data,
+        filters the data, applies Independent Component Analysis (ICA),
+        re-references the data, and down samples the data.
 
-    Args:
-        data (RawEDF): The raw data to process.
-        run (int): The run number.
-        ica (bool): Whether to apply Independent Component Analysis
-            (ICA) to the raw data.
-        plot (bool): Whether to plot the raw data.
+        Apply the sequence to each subject and run combination
+        provided in the arguments. The raw data for each subject
+        and run combination is concatenated into a single raw object.
 
-    Returns:
-        RawEDF: The pre-processed raw data.
-    """
-    plotter = Plotter(plot_enabled=plot)
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
 
-    raw = concatenate_raws([
-        read_raw_edf(f, preload=True, verbose=False) for f in data
-    ])
-    plotter.enable_plot(plotter.plot_raw_data)(raw=raw)
-
-    standardize_channels(raw=raw)
-    plotter.enable_plot(plotter.plot_standard_montage)(raw=raw)
-
-    annotate_raw(raw=raw, run=run)
-    plotter.enable_plot(plotter.plot_annotations)(raw=raw)
-
-    filter_raw(raw=raw)
-    plotter.enable_plot(plotter.plot_filtered_data)(raw=raw)
-
-    if ica:
-        ica_filter(raw=raw)
-        plotter.enable_plot(plotter.plot_ica)(raw=raw)
-
-    re_reference_raw(raw=raw)
-    plotter.enable_plot(plotter.plot_re_referenced_data)(raw=raw)
-
-    downsample_raw(raw=raw, sfreq=160)
-    plotter.enable_plot(plotter.plot_downsampled_data)(raw=raw)
-
-    return raw
-
-
-def preprocess_subject(subject: int, runs: list[int], ica: bool, plot: bool):
-    """
-    Pre-processing sequence for the raw data. The function loads
-    the raw data, standardizes the channels, annotates the data,
-    filters the data, applies Independent Component Analysis (ICA),
-    re-references the data, and down samples the data.
-
-    Apply the sequence to each subject and run combination
-    provided in the arguments. The raw data for each subject
-    and run combination is concatenated into a single raw object.
-
-    Args:
-        subject (int): The subject number.
-        runs (list[int]): List of run numbers.
-        ica (bool): Whether to apply Independent Component Analysis
-            (ICA) to the raw data.
-        plot (bool): Whether to plot the raw data.
-
-    Returns:
-        RawEDF: The pre-processed raw data for all
-            run combinations provided in the arguments.
-    """
-    raws_list = []
-    for run in runs:
+        Returns:
+            RawEDF: The pre-processed raw data for all
+                run combinations provided in the arguments.
+        """
         data = eegbci.load_data(
-            subject=subject,
-            runs=runs,
+            subject=self.subject,
+            runs=self.runs,
             path='data/',
             verbose=0
         )
-        raws_list.append(process(data=data, run=run, ica=ica, plot=plot))
+        self._process(data=data)
 
-    return concatenate_raws(raws_list)
+    def _create_epochs(self):
+        """
+        Creates epochs from the raw data. Epochs are time-locked
+        segments of the raw data that are extracted based on the
+        event markers in the data. The epochs are extracted from
+        the raw data based on the event markers provided in the
+        annotations.
 
+        The epochs are extracted from the raw data with a time
+        window of -0.2 to 4.0 seconds relative to the event
+        markers. The baseline is set to None to avoid applying
+        baseline correction to the data. The data is preloaded
+        to speed up processing.
 
-def create_epochs(raw: RawEDF) -> Epochs:
-    """
-    Creates epochs from the raw data. Epochs are time-locked
-    segments of the raw data that are extracted based on the
-    event markers in the data. The epochs are extracted from
-    the raw data based on the event markers provided in the
-    annotations.
+        The epochs are created for EEG channels only, excluding
+        EOG and Stim channels. Bad channels are also excluded
+        from the epochs.
 
-    The epochs are extracted from the raw data with a time
-    window of -0.2 to 4.0 seconds relative to the event
-    markers. The baseline is set to None to avoid applying
-    baseline correction to the data. The data is preloaded
-    to speed up processing.
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
 
-    The epochs are created for EEG channels only, excluding
-    EOG and Stim channels. Bad channels are also excluded
-    from the epochs.
-
-    Args:
-        raw (RawEDF): The raw data to create epochs from.
-
-    Returns:
-        Epochs: The epochs extracted from the raw data.
-    """
-    events, event_ids = events_from_annotations(raw=raw, verbose=False)
-    picks = pick_types(raw.info, eeg=True, exclude='bads')
-    return Epochs(
-        raw=raw,
-        events=events,
-        event_id=event_ids,
-        tmin=-0.2,
-        tmax=4.0,
-        picks=picks,
-        baseline=(None, 0),
-        preload=True,
-        verbose=False,
-    )
-
-
-def extract_features(epochs: Epochs) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Extracts features and labels from the epochs. The features
-    are the EEG data from the epochs, and the labels are the
-    event markers associated with each epoch. The features and
-    labels are returned as numpy arrays. The copy parameter is
-    set to False, to avoid copying the data, which can save
-    memory and processing time.
-
-    Args:
-        epochs (Epochs): The epochs to extract features and
-            labels from.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: A tuple containing the
-            features and labels extracted from the epochs.
-    """
-    features = epochs.get_data(copy=False)
-    labels = epochs.events[:, -1]
-    return features, labels
-
-
-def preprocess_data(subject: int, runs: list[int], ica: bool) -> tuple:
-    """
-    Pre-processes the data for the specified subjects and runs.
-    The pre-processing steps include loading the raw data,
-    standardizing the channels, annotating the data, filtering
-    the data, applying Independent Component Analysis (ICA),
-    re-referencing the data, and down-sampling the data.
-
-    The pre-processed data is then used to create epochs, which
-    are time-locked segments of the data extracted based on the
-    event markers in the data. The epochs are created for EEG
-    channels only, excluding EOG and Stim channels. Bad channels
-    are also excluded from the epochs.
-
-    After creating the epochs, features and labels are extracted
-    from the epochs. The features are the EEG data from the epochs,
-    and the labels are the event markers associated with each epoch.
-
-    Args:
-        subject (int): The subject number.
-        runs (list[int]): List of run numbers.
-        ica (bool): Whether to apply Independent Component Analysis
-            (ICA) to the raw data.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: A tuple containing the
-            features and labels extracted from the epochs.
-    """
-    try:
-        raw = preprocess_subject(
-            subject=subject,
-            runs=runs,
-            ica=ica,
-            plot=True
+        Returns:
+            None
+        """
+        events, event_id = events_from_annotations(raw=self.raw, verbose=False)
+        picks = pick_types(self.raw.info, eeg=True, exclude='bads')
+        self.epochs = Epochs(
+            raw=self.raw,
+            events=events,
+            event_id=event_id,
+            tmin=-0.2,
+            tmax=4.0,
+            picks=picks,
+            baseline=(None, 0),
+            preload=True,
+            verbose=False,
         )
-        return extract_features(epochs=create_epochs(raw=raw))
 
-    except Exception as e:
-        raise e
+    def _extract_features(self):
+        """
+        Extracts features and labels from the epochs. The features
+        are the EEG data from the epochs, and the labels are the
+        event markers associated with each epoch. The features and
+        labels are returned as numpy arrays. The copy parameter is
+        set to False, to avoid copying the data, which can save
+        memory and processing time.
+
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
+            epochs (Epochs): The epochs to extract features and
+                labels from.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: A tuple containing the
+                features and labels extracted from the epochs.
+        """
+        self.features = self.epochs.get_data(copy=False)
+        self.labels = self.epochs.events[:, -1]
+
+    def preprocess_data(self):
+        """
+        Pre-processes the data for the specified subjects and runs.
+        The pre-processing steps include loading the raw data,
+        standardizing the channels, annotating the data, filtering
+        the data, applying Independent Component Analysis (ICA),
+        re-referencing the data, and down-sampling the data.
+
+        The pre-processed data is then used to create epochs, which
+        are time-locked segments of the data extracted based on the
+        event markers in the data. The epochs are created for EEG
+        channels only, excluding EOG and Stim channels. Bad channels
+        are also excluded from the epochs.
+
+        After creating the epochs, features and labels are extracted
+        from the epochs. The features are the EEG data from the epochs,
+        and the labels are the event markers associated with each epoch.
+
+        Args:
+            self (EEGProcessor): The EEGProcessor instance.
+
+        Returns:
+            tuple[np.ndarray, np.ndarray]: A tuple containing the
+                features and labels extracted from the epochs.
+        """
+        try:
+            self._preprocess_subject()
+            self._create_epochs()
+            self._extract_features()
+
+        except Exception as e:
+            raise e

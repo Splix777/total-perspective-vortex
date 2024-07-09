@@ -22,7 +22,7 @@ from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import accuracy_score
 
 from csp import CustomCSP
-from preprocess_data import preprocess_data
+from preprocess_data import EEGProcessor
 from utils.utils import get_program_config, get_experiment_name, verify_inputs
 
 
@@ -148,6 +148,24 @@ def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
                 scoring='accuracy')
 
 
+def get_training_data(subject: int, runs: int, ica: bool = True):
+    """
+    Get the training data for a given subject and run(s).
+
+    Args:
+        subject (int): The subject number.
+        runs (int) | (list[int]): The run number(s).
+        ica (bool): Whether to use ICA.
+
+    Returns:
+        tuple: A tuple containing the epochs and labels data.
+    """
+    processor = EEGProcessor(
+        runs=[runs] if isinstance(runs, int)
+        else runs, subject=subject, ica=ica, plot=False)
+    return processor.features, processor.labels
+
+
 def train_subject(subject: int, runs: int | list[int], save: bool = True):
     """
     Train the model for a given subject and run(s).
@@ -166,10 +184,7 @@ def train_subject(subject: int, runs: int | list[int], save: bool = True):
     best_pipeline = None
     best_score = None
 
-    epochs, labels = preprocess_data(
-        runs=[runs] if isinstance(runs, int)
-        else runs, subject=subject, ica=True
-    )
+    epochs, labels = get_training_data(subject, runs)
 
     pipelines = create_pipelines()
 
@@ -218,7 +233,7 @@ def predict_subject(subject: int, run: int):
             directory='models',
             file=f'subject_{subject}_{experiment_name}')
 
-    epochs, labels = preprocess_data(subject=subject, runs=[run], ica=True)
+    epochs, labels = get_training_data(subject, run)
 
     X_train, X_test, y_train, y_test = train_test_split(
         epochs,
