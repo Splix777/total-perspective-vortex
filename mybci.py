@@ -158,19 +158,19 @@ def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
     """
     cv = ShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
 
-    with open(os.devnull, 'w') as fnull:
-        with contextlib.redirect_stdout(fnull):
-            for train_index, test_index in cv.split(epochs):
-                X_train = epochs[train_index]
-                y_train = labels[train_index]
-                pipeline.fit(X_train, y_train)
+    # with open(os.devnull, 'w') as fnull:
+    #     with contextlib.redirect_stdout(fnull):
+    for train_index, test_index in cv.split(epochs):
+        X_train = epochs[train_index]
+        y_train = labels[train_index]
+        pipeline.fit(X_train, y_train)
 
-            return cross_val_score(
-                estimator=pipeline,
-                X=epochs,
-                y=labels,
-                cv=cv,
-                scoring='accuracy')
+    return cross_val_score(
+        estimator=pipeline,
+        X=epochs,
+        y=labels,
+        cv=cv,
+        scoring='accuracy')
 
 
 def train_subject(subject: int, runs: int | list[int], save: bool = True,
@@ -278,7 +278,7 @@ def train_or_predict_single_subject(subject: int, run: int, mode: str):
     if mode == 'predict':
         predict_subject(subject=subject, run=run)
     elif mode == 'train':
-        mean, scores = train_subject(subject=subject, runs=run, plot=True)
+        mean, scores = train_subject(subject=subject, runs=run, plot=False)
         for i, score in enumerate(scores):
             print(f"Fold {i + 1} Accuracy: {score * 100:.2f}%")
         print(f"{'-' * 25}\nCross Val Score: {mean * 100:.2f}%")

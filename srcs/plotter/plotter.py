@@ -61,9 +61,6 @@ class Plotter:
             sfreq=sfreq
         )
 
-    def plot_filtered_data(self, raw):
-        pass
-
     def plot_ica(self, raw: RawEDF, ica, eog_scores):
         self.report.add_ica(
             ica=ica,
@@ -74,12 +71,6 @@ class Plotter:
             n_jobs=1
         )
 
-    def plot_re_referenced_data(self, raw):
-        pass
-
-    def plot_downsampled_data(self, raw):
-        pass
-
     def plot_epochs(self, epochs: Epochs, event_id: dict):
         self.report.add_epochs(epochs=epochs, title='Epochs')
         for event in event_id.keys():
@@ -87,5 +78,5 @@ class Plotter:
             self.report.add_evokeds(
                 evokeds=evoked,
                 titles=f'Evoked {event}',
-                n_time_points=5
+                n_time_points=10
             )

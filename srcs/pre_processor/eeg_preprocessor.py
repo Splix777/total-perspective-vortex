@@ -14,6 +14,7 @@ from mne.epochs import make_metadata
 from srcs.utils.utils import get_experiment
 from srcs.utils.decorators import time_limit
 from srcs.plotter.plotter import Plotter
+from srcs.preprocessing_methods.csp import CustomCSP
 
 
 @dataclass
@@ -417,6 +418,7 @@ class EEGProcessor:
                 self.plotter.report.save(
                     fname='images/plots/plots.html',
                     overwrite=True)
+
 
         except Exception as e:
             raise e

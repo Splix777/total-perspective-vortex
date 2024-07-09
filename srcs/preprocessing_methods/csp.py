@@ -1,5 +1,8 @@
 import numpy as np
 from itertools import combinations
+
+from matplotlib import pyplot as plt
+from mne.viz import plot_topomap
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
@@ -26,8 +29,6 @@ class CustomCSP(BaseEstimator, TransformerMixin):
     def __init__(self, n_components=4):
         self.n_components = n_components
         self.filters = None
-        self.mean = None
-        self.std = None
 
     @staticmethod
     def _calculate_cov(X: np.ndarray, y: np.ndarray) -> np.ndarray:
@@ -180,36 +181,6 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         eigenvalues, eigenvectors = self._calculate_eig(covs=covs)
         self.pick_filters(eigenvectors)
 
-    def transform_epochs(self, X: np.ndarray):
-        """
-        Transform the input data using the CSP filters.
-        The transformation step involves projecting the EEG data
-        onto the CSP filters to extract features that are
-        discriminative for a given classification task.
-
-        Input shape (n_epochs, n_channels, n_times). Is
-        transformed to (n_epochs, n_components). This
-        transformation is achieved by multiplying the CSP
-        filters with the EEG data.
-
-        The purpose of this method is to calculate the mean
-        and standard deviation of the transformed data. The
-        mean and standard deviation are used to standardize
-        the features in the transform method.
-
-        Args:
-            X (np.ndarray): The EEG data.
-                Shape (n_epochs, n_channels, n_times).
-
-        Returns:
-            None
-        """
-        X = np.asarray([np.dot(self.filters, epoch) for epoch in X])
-        X = (X ** 2).mean(axis=2)
-
-        self.mean = X.mean(axis=0)
-        self.std = X.std(axis=0)
-
     def transform(self, X: np.ndarray):
         """
         Transform the input data using the CSP filters.
@@ -234,15 +205,19 @@ class CustomCSP(BaseEstimator, TransformerMixin):
             X (np.ndarray): The transformed EEG data using CSP filters.
                 Shape (n_epochs, n_components).
         """
-        self.transform_epochs(X)
-        X = np.asarray([np.dot(self.filters, epoch) for epoch in X])
+        X_transformed = np.tensordot(
+            a=X,
+            b=self.filters,
+            axes=(1, 1)).transpose(0, 2, 1)
 
-        X = (X ** 2).mean(axis=2)
+        # Calculate the mean of the squared values along the time axis
+        X_transformed = np.mean(X_transformed ** 2, axis=2)
 
-        X -= self.mean
-        X /= self.std
+        # Standardize the features
+        X_transformed -= np.mean(X_transformed, axis=0)
+        X_transformed /= np.std(X_transformed, axis=0)
 
-        return X
+        return X_transformed
 
     def fit_transform(self, X: np.ndarray, y: np.ndarray = None, **fit_params):
         """
@@ -273,6 +248,31 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         try:
             self.fit(X=X, y=y)
             return self.transform(X=X)
-
         except Exception as e:
             raise e
+
+    def plot_csp_scatter(self, X_transformed: np.ndarray, y: np.ndarray):
+        """
+        Plot a 2D scatter plot of the transformed data with CSP filters as vectors.
+
+        Args:
+            X_transformed (np.ndarray): The transformed EEG data.
+                Shape (n_epochs, n_components).
+            y (np.ndarray): The labels for each epoch.
+                Shape (n_epochs, ).
+        """
+        plt.figure(figsize=(10, 7))
+        for label in np.unique(y):
+            plt.scatter(X_transformed[y == label, 0], X_transformed[y == label, 1], label=f'Class {label}')
+
+        # Plot the CSP filters as vectors
+        for i in range(2):
+            plt.quiver(0, 0, self.filters[i, 0], self.filters[i, 1], angles='xy', scale_units='xy', scale=1, color='r', alpha=0.5)
+
+        plt.title('CSP Transformed Data and Filters')
+        plt.xlabel('Component 1')
+        plt.ylabel('Component 2')
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
