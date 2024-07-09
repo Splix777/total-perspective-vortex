@@ -2,7 +2,7 @@ import numpy as np
 
 from dataclasses import dataclass, field
 
-from mne.preprocessing import ICA, create_eog_epochs
+from mne.preprocessing import ICA
 from mne.io import read_raw_edf
 from mne.datasets import eegbci
 from mne.io.edf.edf import RawEDF
@@ -14,7 +14,6 @@ from mne.epochs import make_metadata
 from srcs.utils.utils import get_experiment
 from srcs.utils.decorators import time_limit
 from srcs.plotter.plotter import Plotter
-from srcs.reduction_algorithms.csp import CustomCSP
 
 
 @dataclass
@@ -386,6 +385,7 @@ class EEGProcessor:
         self.labels = self.epochs.events[:, -1]
         if self.plot:
             self.plotter.plot_csp_results(self.features, self.labels)
+            self.plotter.plot_covariance_matrices(self.epochs)
 
     def preprocess_data(self):
         """

@@ -3,7 +3,6 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 
-from matplotlib import use
 from mne.io.edf.edf import RawEDF
 from mne import Epochs
 
@@ -97,7 +96,7 @@ class Plotter:
         Returns
             None
         """
-        csp = CustomCSP(n_components=16)
+        csp = CustomCSP(n_components=2)
         X_transformed = csp.fit_transform(X, y)
         filters = csp.get_filters()
 
@@ -128,4 +127,27 @@ class Plotter:
         self.report.add_figure(
             fig=fig,
             title='CSP Transformed'
+        )
+
+    def plot_covariance_matrices(self, epochs: Epochs):
+        """
+        Plots the covariance matrices of the input epochs.
+
+        Args:
+            epochs (Epochs): The input epochs for which covariance
+                matrices will be plotted.
+
+        Returns:
+            None
+        """
+        data_cov = mne.compute_covariance(
+            epochs=epochs,
+            method='shrunk',
+            tmin=0,
+            tmax=4.0
+        )
+        self.report.add_covariance(
+            cov=data_cov,
+            info=epochs.info,
+            title='Data Covariance'
         )

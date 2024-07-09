@@ -181,7 +181,7 @@ class CustomCSP(BaseEstimator, TransformerMixin):
             X = np.abs(X)
 
         covs = self._calculate_cov(X=X, y=y)
-        eigenvalues, eigenvectors = self._calculate_eig(covs=covs)
+        eigenvalues, eigenvectors = self._calculate_eig(covs)
         self.pick_filters(eigenvectors)
 
     def transform(self, X: np.ndarray):

@@ -265,7 +265,8 @@ def predict_subject(subject: int, run: int):
     print(f"{'-' * 36}\nAccuracy: {accuracy * 100:.2f}%")
 
 
-def train_or_predict_single_subject(subject: int, run: int, mode: str):
+def train_or_predict_single_subject(subject: int, run: int, mode: str,
+                                    plot: bool = False):
     """
     Train or predict the model for a given subject and run.
 
@@ -273,6 +274,7 @@ def train_or_predict_single_subject(subject: int, run: int, mode: str):
         subject (int): The subject number.
         run (int): The run number.
         mode (str): The mode of the program.
+        plot (bool): Whether to plot the data.
 
     Returns:
         None
@@ -283,7 +285,7 @@ def train_or_predict_single_subject(subject: int, run: int, mode: str):
     if mode == 'predict':
         predict_subject(subject=subject, run=run)
     elif mode == 'train':
-        mean, scores = train_subject(subject=subject, runs=run, plot=True)
+        mean, scores = train_subject(subject=subject, runs=run, plot=plot)
         for i, score in enumerate(scores):
             print(f"Fold {i + 1} Accuracy: {score * 100:.2f}%")
         print(f"{'-' * 25}\nCross Val Score: {mean * 100:.2f}%")
@@ -344,6 +346,7 @@ def bci():
         parser.add_argument('--subject', type=int, required=True)
         parser.add_argument('--run', type=int, required=True)
         parser.add_argument('--mode', type=str, required=True)
+        parser.add_argument('--plot', action='store_true')
         args = parser.parse_args()
 
         subject, run, mode = verify_inputs(
@@ -352,7 +355,12 @@ def bci():
             mode=args.mode
         )
 
-        train_or_predict_single_subject(subject=subject, run=run, mode=mode)
+        train_or_predict_single_subject(
+            subject=subject,
+            run=run,
+            mode=mode,
+            plot=args.plot
+        )
 
 
 def main():
