@@ -22,7 +22,12 @@ from sklearn.metrics import accuracy_score
 
 from srcs.preprocessing_methods.csp import CustomCSP
 from srcs.pre_processor.eeg_preprocessor import EEGProcessor
-from srcs.utils.utils import get_program_config, get_experiment, verify_inputs
+from srcs.utils.utils import (
+    get_program_config,
+    get_experiment,
+    verify_inputs,
+    print_error_tree
+)
 from srcs.utils.decorators import time_it
 
 
@@ -359,9 +364,7 @@ def main():
         print('Program terminated by user')
         sys.exit(1)
     except Exception as e:
-        import traceback
-        error_function = traceback.extract_tb(e.__traceback__)[-1].name
-        print(f'Error in function `{error_function}`: {e}')
+        print_error_tree(e)
 
 
 if __name__ == '__main__':

@@ -1,4 +1,7 @@
+import sys
 import json
+import traceback
+
 from pathlib import Path
 
 
@@ -53,7 +56,6 @@ def get_directory(directory: str, config_path: str = 'config.json') -> Path:
         return project_root / directory_path
     except KeyError as e:
         raise ValueError(f'Config file must contain "{directory}" key') from e
-
 
 
 def check_runs_same_exp(runs: list[int], experiments: list[dict]) -> str:
@@ -153,3 +155,13 @@ def verify_inputs(subject: int, run: int, mode: str):
     if mode in {'train', 'predict'}:
         return subject, run, mode
     raise ValueError('Mode must be either "train" or "predict"')
+
+
+def print_error_tree(e):
+    tb = traceback.extract_tb(e.__traceback__)
+    print('Traceback (most recent call last):')
+    for frame in tb:
+        print(f'File "{frame.filename}", line {frame.lineno}, in {frame.name}')
+        print(f'  {frame.line}')
+    print(f'Error: {e}')
+    sys.exit(1)

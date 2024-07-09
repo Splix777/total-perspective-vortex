@@ -103,7 +103,7 @@ class EEGProcessor:
             )
             ica.exclude.extend(eog_indices)
 
-        # ica.apply(inst=self.raw, exclude=ica.exclude, verbose=False)
+        ica.apply(inst=self.raw, exclude=ica.exclude, verbose=False)
 
         if self.plot:
             self.plotter.plot_ica(

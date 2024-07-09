@@ -168,6 +168,8 @@ class CustomCSP(BaseEstimator, TransformerMixin):
 
         Finally, we select the CSP filters from the eigenvectors.
 
+        If X is a complex object, we take the absolute value of X.
+
         Args:
             X (np.ndarray): The EEG data.
                 Shape (n_epochs, n_channels, n_times).
@@ -177,6 +179,9 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         Returns:
             None
         """
+        if np.iscomplexobj(X):
+            X = np.abs(X)
+
         covs = self._calculate_cov(X=X, y=y)
         eigenvalues, eigenvectors = self._calculate_eig(covs=covs)
         self.pick_filters(eigenvectors)
@@ -197,6 +202,10 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         shape (n_epochs, n_components). We standardize the features
         by subtracting the mean and dividing by the standard deviation.
 
+        If X_transformed is a complex object, we take the absolute
+        value of X_transformed.
+
+
         Args:
             X (np.ndarray): The EEG data.
                 Shape (n_epochs, n_channels, n_times).
@@ -216,6 +225,9 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         # Standardize the features
         X_transformed -= np.mean(X_transformed, axis=0)
         X_transformed /= np.std(X_transformed, axis=0)
+
+        if np.iscomplexobj(X_transformed):
+            X_transformed = np.abs(X_transformed)
 
         return X_transformed
 
