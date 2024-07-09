@@ -1,3 +1,7 @@
+import contextlib
+import os
+
+import mne
 import numpy as np
 
 from dataclasses import dataclass, field
@@ -16,22 +20,20 @@ from srcs.utils.decorators import time_limit
 from srcs.plotter.plotter import Plotter
 
 
-@dataclass
 class EEGProcessor:
-    subject: int
-    runs: list[int]
-    ica: bool
-    plot: bool
-    plotter: Plotter = field(init=False)
-    raw: RawEDF = field(init=False, default=None)
-    epochs: Epochs = field(init=False, default=None)
-    features: np.ndarray = field(init=False, default=None)
-    labels: np.ndarray = field(init=False, default=None)
-
-    def __post_init__(self):
-        if self.plot:
+    def __init__(self, subject: int, runs: int | list[int], ica: bool,
+                 plot: bool):
+        self.subject = subject
+        self.runs = runs
+        self.ica = ica
+        self.plot = plot
+        self.plotter = None
+        if plot:
             self.plotter = Plotter()
-        self.preprocess_data()
+        self.raw = None
+        self.epochs = None
+        self.features = None
+        self.labels = None
 
     def _event_description(self) -> dict:
         """
@@ -52,7 +54,7 @@ class EEGProcessor:
         return {int(k): v for k, v in experiment['mapping'].items()}
 
     @time_limit(limit=10)
-    def _ica_filter(self):
+    def _ica_filter(self, raw: RawEDF):
         """
         Independent Component Analysis (ICA) is used to remove
         eye movement artifacts from the raw data. The function
@@ -75,7 +77,7 @@ class EEGProcessor:
         eye movement components.
 
         Args:
-            self (EEGProcessor): The EEGProcessor instance.
+            raw (RawEDF): process in place.
 
         Returns:
             None
@@ -87,31 +89,32 @@ class EEGProcessor:
             random_state=42,
             verbose=False
         )
-        ica.fit(inst=self.raw, verbose=False)
+        ica.fit(inst=raw, verbose=False)
 
         eog_susceptible_channels = ['Fp1', 'Fp2', 'Fz', 'F4', 'F8', 'Fpz']
         eog_scores = None
         for channel in eog_susceptible_channels:
             eog_indices, eog_scores = ica.find_bads_eog(
-                inst=self.raw,
+                inst=raw,
                 ch_name=channel,
                 threshold=1.5,
-                l_freq=8,
+                l_freq=5,
                 h_freq=30,
                 verbose=False
             )
             ica.exclude.extend(eog_indices)
 
-        ica.apply(inst=self.raw, exclude=ica.exclude, verbose=False)
+        ica.apply(inst=raw, exclude=ica.exclude, verbose=False)
 
-        if self.plot:
+        if self.plot and ica.exclude:
             self.plotter.plot_ica(
-                raw=self.raw,
+                raw=raw,
                 ica=ica,
                 eog_scores=eog_scores,
             )
 
-    def _filter_raw(self):
+    @staticmethod
+    def _filter_raw(raw: RawEDF):
         """
         Applies notch filter of 60 Hz. Notch filters are used
         to eliminate power line noise from the raw data. Common
@@ -133,13 +136,13 @@ class EEGProcessor:
         near the edges of the raw data.
 
         Args:
-            self (EEGProcessor): The EEGProcessor instance.
+            raw (RawEDF): process in place.
 
         Returns:
             None
         """
-        self.raw.notch_filter(60, method="iir", verbose=False)
-        self.raw.filter(
+        raw.notch_filter(60, method="fir", verbose=False)
+        raw.filter(
             l_freq=8,
             h_freq=30,
             fir_design='firwin',
@@ -147,7 +150,8 @@ class EEGProcessor:
             verbose=False
         )
 
-    def _re_reference_raw(self):
+    @staticmethod
+    def _re_reference_raw(raw: RawEDF):
         """
         Re-references the raw data to the average reference.
         Its process of recalculating the EEG signal by
@@ -164,19 +168,20 @@ class EEGProcessor:
         remove artifacts from the raw data.
 
         Args:
-            self (EEGProcessor): The EEGProcessor instance.
+            raw (RawEDF): process in place.
 
         Returns:
             None
         """
-        self.raw.set_eeg_reference(
+        raw.set_eeg_reference(
             ref_channels='average',
             projection=True,
             verbose=False
         )
-        self.raw.apply_proj(verbose=False)
+        raw.apply_proj(verbose=False)
 
-    def _downsample_raw(self, sfreq):
+    @staticmethod
+    def _downsample_raw(raw: RawEDF, sfreq):
         """
         Down samples the raw data to the specified sampling
         frequency. This means recording fewer data points
@@ -191,15 +196,15 @@ class EEGProcessor:
         can help reduce these distortions.
 
         Args:
-            self (EEGProcessor): The EEGProcessor instance.
+            raw (RawEDF): process in place.
             sfreq (int): The sampling frequency to downsample to.
 
         Returns:
             None
         """
-        self.raw.resample(sfreq, npad="auto", verbose=False)
+        raw.resample(sfreq, npad="auto", verbose=False)
 
-    def _standardize_channels(self):
+    def _standardize_channels(self, raw: RawEDF):
         """
         Standardizes the raw data by applying the standard
         10-20 electrode system. This system is used to
@@ -213,21 +218,21 @@ class EEGProcessor:
         10-20 system.
 
         Args:
-            self (EEGProcessor): The EEGProcessor instance.
+            raw (RawEDF): process in place.
 
         Returns:
             None
         """
-        eegbci.standardize(self.raw)
-        self.raw.set_montage(
+        eegbci.standardize(raw)
+        raw.set_montage(
             montage=make_standard_montage('standard_1020'),
             verbose=False
         )
         if self.plot:
-            self.plotter.plot_raw_data(self.raw)
-            self.plotter.plot_standard_montage(raw=self.raw)
+            self.plotter.plot_raw_data(raw)
+            self.plotter.plot_standard_montage(raw=raw)
 
-    def _annotate_raw(self):
+    def _annotate_raw(self, raw: RawEDF):
         """
         Annotates the raw data based on the event descriptions
         provided by the event_description function. The event
@@ -241,27 +246,27 @@ class EEGProcessor:
         condition occurred during the recording.
 
         Args:
-            self (EEGProcessor): The EEGProcessor instance.
+            raw (RawEDF): process in place.
 
         Returns:
             None
         """
         events, _ = events_from_annotations(
-            raw=self.raw,
+            raw=raw,
             event_id=dict(T0=1, T1=2, T2=3),
             verbose=False
         )
         annotations = annotations_from_events(
             events=events,
             event_desc=self._event_description(),
-            sfreq=self.raw.info['sfreq'],
-            orig_time=self.raw.info['meas_date'],
+            sfreq=raw.info['sfreq'],
+            orig_time=raw.info['meas_date'],
             verbose=False
         )
-        self.raw.set_annotations(annotations=annotations, verbose=False)
+        raw.set_annotations(annotations=annotations, verbose=False)
 
         if self.plot:
-            self.plotter.plot_annotations(raw=self.raw)
+            self.plotter.plot_annotations(raw=raw)
 
     def _process(self, data: list):
         """
@@ -275,19 +280,20 @@ class EEGProcessor:
             data (RawEDF): The raw data to process.
 
         Returns:
-            None
+            raw (RawEDF): raw file post-processing
         """
 
-        self.raw = concatenate_raws([
+        raw = concatenate_raws([
             read_raw_edf(f, preload=True, verbose=False) for f in data
         ])
-        self._standardize_channels()
-        self._annotate_raw()
-        self._filter_raw()
+        self._standardize_channels(raw=raw)
+        self._annotate_raw(raw=raw)
+        self._filter_raw(raw=raw)
         if self.ica:
-            self._ica_filter()
-        self._re_reference_raw()
-        self._downsample_raw(sfreq=160)
+            self._ica_filter(raw=raw)
+        self._re_reference_raw(raw=raw)
+        self._downsample_raw(raw=raw, sfreq=160)
+        return raw
 
     def _preprocess_subject(self):
         """
@@ -307,13 +313,17 @@ class EEGProcessor:
             RawEDF: The pre-processed raw data for all
                 run combinations provided in the arguments.
         """
-        data = eegbci.load_data(
-            subject=self.subject,
-            runs=self.runs,
-            path='data/',
-            verbose=0
-        )
-        self._process(data=data)
+        all_runs = []
+        for run in self.runs:
+            data = eegbci.load_data(
+                subject=self.subject,
+                runs=run,
+                path='data/',
+                verbose=0
+            )
+            all_runs.append(self._process(data=data))
+
+        self.raw = concatenate_raws(all_runs)
 
     def _create_epochs(self):
         """
@@ -360,6 +370,7 @@ class EEGProcessor:
             metadata=metadata,
             verbose=False,
         )
+        # self.epochs.equalize_event_counts(event_ids=event_id)
         if self.plot:
             self.plotter.plot_epochs(epochs=self.epochs, event_id=event_id)
 
@@ -381,7 +392,7 @@ class EEGProcessor:
             tuple[np.ndarray, np.ndarray]: A tuple containing the
                 features and labels extracted from the epochs.
         """
-        self.features = self.epochs.get_data(copy=False)
+        self.features = self.epochs.get_data(copy=True)
         self.labels = self.epochs.events[:, -1]
         if self.plot:
             self.plotter.plot_csp_results(self.features, self.labels)
@@ -418,8 +429,11 @@ class EEGProcessor:
             self._extract_features()
             if self.plot:
                 self.plotter.report.save(
-                    fname='images/plots/plots.html',
-                    overwrite=True)
+                    fname=f'{self.plotter.save_directory}/plots.html',
+                    overwrite=True
+                )
+            del self.raw, self.epochs
+            return self.features, self.labels
 
         except Exception as e:
             raise e

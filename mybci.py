@@ -3,18 +3,22 @@ import sys
 import pickle
 import argparse
 import contextlib
+import multiprocessing
 
 import numpy as np
 
 from itertools import product
 
-# For testings with sklearn's CSP and SPoC
+# For testings with sklearn's various sklearn classifiers
 # from mne.decoding import CSP, SPoC
-from sklearn.svm import SVC
+# from sklearn.svm import SVC
+# from sklearn.linear_model import LogisticRegression
+# from sklearn.ensemble import (
+#     RandomForestClassifier,
+#     GradientBoostingClassifier
+# )
 from sklearn.neural_network import MLPClassifier
-from sklearn.linear_model import LogisticRegression
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.pipeline import make_pipeline, Pipeline
 from sklearn.model_selection import ShuffleSplit
 from sklearn.model_selection import cross_val_score, train_test_split
@@ -26,7 +30,8 @@ from srcs.utils.utils import (
     get_program_config,
     get_experiment,
     verify_inputs,
-    print_error_tree
+    print_error_tree,
+    download_subjects
 )
 from srcs.utils.decorators import time_it
 
@@ -90,28 +95,30 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
     Returns:
         list: A list of pipelines to train the model.
     """
+    # For testing with various classifiers
+    # log_reg = LogisticRegression(penalty='l2', solver='liblinear')
+    # rfc = RandomForestClassifier(n_estimators=100, random_state=42)
+    # svm = SVC(kernel='linear', C=1.0)
+    # gbc = GradientBoostingClassifier(
+    #     n_estimators=100,
+    #     learning_rate=0.01,
+    #     max_depth=3)
     lda = LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto')
-    log_reg = LogisticRegression(penalty='l2', solver='liblinear')
-    rfc = RandomForestClassifier(n_estimators=100, random_state=42)
-    svm = SVC(kernel='linear', C=1.0)
-    gbc = GradientBoostingClassifier(
-        n_estimators=100,
-        learning_rate=0.01,
-        max_depth=3)
     mlp = MLPClassifier(
         hidden_layer_sizes=(32,),
-        max_iter=100_000,
+        max_iter=5_000,
         early_stopping=True,
         learning_rate_init=0.001,
-        learning_rate='adaptive',
-        n_iter_no_change=200
+        learning_rate='invscaling',
+        n_iter_no_change=10
     )
-    estimators = [lda, log_reg, rfc, svm, gbc, mlp]
+    # estimators = [lda, log_reg, rfc, svm, gbc, mlp]
+    estimators = [lda, mlp]
 
     # For testing with sklearn's CSP and SPoC
     # csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
     # spoc = SPoC(n_components=15, log=True, reg='oas', rank='full')
-    custom_csp = CustomCSP(n_components=16)
+    custom_csp = CustomCSP(n_components=32)
     # reduction_algorithms = [custom_csp, csp, spoc]
     preprocessing_methods = [custom_csp]
 
@@ -127,7 +134,7 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
 
 
 def get_training_data(subject: int, runs: int, ica: bool = True,
-                      plot: bool = False) -> EEGProcessor:
+                      plot: bool = False) -> tuple:
     """
     Get the training data for a given subject and run(s).
 
@@ -140,12 +147,13 @@ def get_training_data(subject: int, runs: int, ica: bool = True,
     Returns:
         EEGProcessor: The processed data.
     """
-    return EEGProcessor(
+    preprocessor = EEGProcessor(
         runs=[runs] if isinstance(runs, int) else runs,
         subject=subject,
         ica=ica,
         plot=plot,
     )
+    return preprocessor.preprocess_data()
 
 
 def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
@@ -196,7 +204,7 @@ def train_subject(subject: int, runs: int | list[int], save: bool = True,
     best_pipeline = None
     best_score = -np.inf
 
-    processed_data = get_training_data(
+    features, labels = get_training_data(
         subject=subject,
         runs=runs,
         ica=ica,
@@ -205,8 +213,8 @@ def train_subject(subject: int, runs: int | list[int], save: bool = True,
 
     for pipeline_name, pipeline in create_pipelines():
         score = train_model(
-            epochs=processed_data.features,
-            labels=processed_data.labels,
+            epochs=features,
+            labels=labels,
             pipeline=pipeline)
         if np.mean(score) > np.mean(best_score):
             best_pipeline = pipeline
@@ -240,7 +248,7 @@ def predict_subject(subject: int, run: int):
         file=f"subject_{subject}_{get_experiment(run)['name']}"
     )
 
-    processed_data = get_training_data(
+    features, labels = get_training_data(
         subject=subject,
         runs=run,
         ica=False,
@@ -248,8 +256,8 @@ def predict_subject(subject: int, run: int):
     )
 
     X_train, X_test, y_train, y_test = train_test_split(
-        processed_data.features,
-        processed_data.labels,
+        features,
+        labels,
         test_size=0.2,
         random_state=42
     )
@@ -327,6 +335,28 @@ def train_all_subjects():
     print(f"Mean Accuracy all experiments: {mean_all_experiments * 100:.2f}%")
 
 
+def get_input_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--subject', type=int, required=True)
+    parser.add_argument('--run', type=int, required=True)
+    parser.add_argument('--mode', type=str, required=True)
+    parser.add_argument('--plot', action='store_true')
+    args = parser.parse_args()
+
+    subject, run, mode = verify_inputs(
+        subject=args.subject,
+        run=args.run,
+        mode=args.mode
+    )
+
+    train_or_predict_single_subject(
+        subject=subject,
+        run=run,
+        mode=mode,
+        plot=args.plot
+    )
+
+
 def bci():
     """
     Main function to run the program.
@@ -339,38 +369,31 @@ def bci():
     Returns:
         None
     """
-    if len(sys.argv) == 1:
-        train_all_subjects()
-    else:
-        parser = argparse.ArgumentParser()
-        parser.add_argument('--subject', type=int, required=True)
-        parser.add_argument('--run', type=int, required=True)
-        parser.add_argument('--mode', type=str, required=True)
-        parser.add_argument('--plot', action='store_true')
-        args = parser.parse_args()
+    dl_process = None
+    try:
+        if len(sys.argv) == 1:
+            dl_process = multiprocessing.Process(target=download_subjects)
+            dl_process.start()
+            train_all_subjects()
+        else:
+            get_input_args()
 
-        subject, run, mode = verify_inputs(
-            subject=args.subject,
-            run=args.run,
-            mode=args.mode
-        )
-
-        train_or_predict_single_subject(
-            subject=subject,
-            run=run,
-            mode=mode,
-            plot=args.plot
-        )
+    except KeyboardInterrupt as e:
+        raise KeyboardInterrupt("Program interrupted by user.") from e
+    except Exception as e:
+        raise e
+    finally:
+        if dl_process and dl_process.is_alive():
+            dl_process.terminate()
+            dl_process.join()
 
 
 def main():
     """🧠"""
     try:
         bci()
-
-    except KeyboardInterrupt:
-        print('Program terminated by user')
-        sys.exit(1)
+    except KeyboardInterrupt as e:
+        print("Program interrupted by user.")
     except Exception as e:
         print_error_tree(e)
 

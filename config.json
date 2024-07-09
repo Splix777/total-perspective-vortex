@@ -54,7 +54,7 @@
         "description": "imagine opening and closing both fists or both feet",
         "runs": [6, 10, 14],
         "mapping": {
-            "1": "rest",
+            "1": "bad",
             "2": "imagine both fists",
             "3": "imagine both feet"
         }

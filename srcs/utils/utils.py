@@ -1,8 +1,13 @@
+import contextlib
+import os
+import signal
 import sys
 import json
 import traceback
 
 from pathlib import Path
+
+from mne.datasets.eegbci import eegbci
 
 
 def get_program_config(config_path: str = 'config.json'):
@@ -174,3 +179,37 @@ def print_error_tree(e: Exception):
         print(f'  {frame.line}')
     print(f'Error: {e}')
     sys.exit(1)
+
+
+def download_subjects():
+    """
+    Downloads the subjects from the dataset.
+    """
+    subjects = list(range(1, 2))
+
+    def sigterm_handler(signum, frame):
+        """
+        Signal handler for SIGTERM.
+        """
+        print("Received SIGTERM. Terminating download process.")
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
+    try:
+        with open(os.devnull, 'w') as fnull:
+            with contextlib.redirect_stderr(fnull):
+                for subject in subjects:
+                    eegbci.load_data(
+                        subject=subject,
+                        runs=list(range(3, 15)),
+                        path='data/',
+                        verbose=0
+                    )
+
+    except Exception as e:
+        print(f"Error in downloading subjects: {e}")
+        sys.exit(1)
+    else:
+        print("-----Finished downloading subjects-----")
+        sys.exit(0)
