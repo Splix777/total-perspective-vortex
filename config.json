@@ -7,22 +7,16 @@
   "settings": {
     "log_level": "INFO"
   },
-  "paths": {
-    "output_directory": "data",
-    "source_directory": "src",
-    "logs_directory": "logs",
-    "temp_directory": ".temp",
-    "subjects_directory": "data/subjects",
-    "model_directory": "data/models",
-    "plot_directory": "data/plots"
+  "directories": {
+    "images": "images",
+    "data": "data",
+    "models": "models",
+    "logs": "logs",
+    "plots": "images/plots"
   },
   "number_of_subjects": 109,
   "number_of_runs": 14,
   "samples_per_second": 160,
-  "val_split": 0.2,
-  "test_split": 0.1,
-  "shuffle_seed": 69,
-  "batch_size": 32,
   "format": "BCI2000",
   "experiments": [
     {
@@ -30,9 +24,9 @@
         "description": "open and close left or right fist",
         "runs": [3, 7, 11],
         "mapping": {
-            "0": "rest",
-            "1": "left fist",
-            "2": "right fist"
+            "1": "bad",
+            "2": "left fist",
+            "3": "right fist"
         }
     },
     {
@@ -40,9 +34,9 @@
         "description": "imagine opening and closing left or right fist",
         "runs": [4, 8, 12],
         "mapping": {
-            "0": "rest",
-            "1": "imagine left fist",
-            "2": "imagine right fist"
+            "1": "bad",
+            "2": "imagine left fist",
+            "3": "imagine right fist"
         }
     },
     {
@@ -50,9 +44,9 @@
         "description": "open and close both fists or both feet",
         "runs": [5, 9, 13],
         "mapping": {
-            "0": "rest",
-            "1": "both fists",
-            "2": "both feet"
+            "1": "bad",
+            "2": "both fists",
+            "3": "both feet"
         }
     },
     {
@@ -60,9 +54,9 @@
         "description": "imagine opening and closing both fists or both feet",
         "runs": [6, 10, 14],
         "mapping": {
-            "0": "rest",
-            "1": "imagine both fists",
-            "2": "imagine both feet"
+            "1": "rest",
+            "2": "imagine both fists",
+            "3": "imagine both feet"
         }
     }
   ]

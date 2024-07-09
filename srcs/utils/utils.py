@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 
 def get_program_config(config_path: str = 'config.json'):
@@ -19,9 +20,7 @@ def get_program_config(config_path: str = 'config.json'):
     """
     try:
         with open(config_path, 'r') as f:
-            config = json.load(f)
-
-        return config
+            return json.load(f)
 
     except json.JSONDecodeError as e:
         raise ValueError('config_path must be a valid json file') from e
@@ -31,7 +30,33 @@ def get_program_config(config_path: str = 'config.json'):
         raise ValueError('config_path must be a valid path') from e
 
 
-def check_runs_same_experiment(runs: list[int], experiments: list[dict]):
+def get_directory(directory: str, config_path: str = 'config.json') -> Path:
+    """
+    Retrieves the directory path from the configuration file.
+
+    Args:
+        directory (str): The directory key to retrieve.
+        config_path (str): Path to the JSON configuration
+            file. Defaults to 'config.json'.
+
+    Returns:
+        Path: The directory path.
+
+    Raises:
+        ValueError: If the directory key is not found in the
+            configuration file.
+    """
+    config = get_program_config(config_path)
+    try:
+        directory_path = config['directories'][directory]
+        project_root = Path(__file__).resolve().parent.parent.parent
+        return project_root / directory_path
+    except KeyError as e:
+        raise ValueError(f'Config file must contain "{directory}" key') from e
+
+
+
+def check_runs_same_exp(runs: list[int], experiments: list[dict]) -> str:
     """
     Checks if all runs in the list belong to the same experiment.
 
@@ -39,6 +64,9 @@ def check_runs_same_experiment(runs: list[int], experiments: list[dict]):
         runs (list[int]): List of run numbers to check.
         experiments (list[dict]): List of experiments
             from configuration.
+
+    Returns:
+        str: The name of the experiment
 
     Raises:
         ValueError: If runs do not belong to the same experiment.
@@ -66,7 +94,7 @@ def check_runs_same_experiment(runs: list[int], experiments: list[dict]):
     return experiment_names.pop()
 
 
-def get_experiment_name(run: int | list[int]):
+def get_experiment(run: int | list[int]) -> dict:
     """
     Determines the experiment name based on the run
     number and configuration.
@@ -76,8 +104,7 @@ def get_experiment_name(run: int | list[int]):
             determine the experiment name for.
 
     Returns:
-        str: The name of the experiment associated
-            with the given run number.
+        dict: The experiment configuration.
 
     Raises:
         ValueError: If the run number does not match
@@ -87,10 +114,16 @@ def get_experiment_name(run: int | list[int]):
 
     try:
         experiments = config['experiments']
-        return check_runs_same_experiment(
+        name = check_runs_same_exp(
             runs=[run] if isinstance(run, int) else run,
             experiments=experiments,
         )
+        return next(
+            (experiment for experiment in experiments
+             if experiment['name'] == name),
+            None
+        )
+
     except KeyError as e:
         raise ValueError('Config file must contain "experiments" key') from e
     except Exception as e:

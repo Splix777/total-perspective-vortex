@@ -7,7 +7,6 @@ import contextlib
 import numpy as np
 
 from itertools import product
-from multiprocessing import Pool
 
 # For testings with sklearn's CSP and SPoC
 # from mne.decoding import CSP, SPoC
@@ -21,12 +20,13 @@ from sklearn.model_selection import ShuffleSplit
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import accuracy_score
 
-from csp import CustomCSP
-from preprocess_data import EEGProcessor
-from utils.utils import get_program_config, get_experiment_name, verify_inputs
+from srcs.preprocessing_methods.csp import CustomCSP
+from srcs.pre_processor.eeg_preprocessor import EEGProcessor
+from srcs.utils.utils import get_program_config, get_experiment, verify_inputs
+from srcs.utils.decorators import time_it
 
 
-def save_model(directory: str, file: str, model: Pipeline, score: float):
+def save_model(directory: str, file: str, model: Pipeline):
     """
     Save the model and the score to a file to
     the specified directory.
@@ -35,22 +35,23 @@ def save_model(directory: str, file: str, model: Pipeline, score: float):
         directory (str): The directory to save the model.
         file (str): The name of the file to save the model.
         model (Pipeline): The model to save.
-        score (float): The score of the model.
 
     Returns:
         None
+
+    Raises:
+        ValueError: If there is an error saving the model.
     """
-    os.makedirs(name=directory, exist_ok=True)
+    try:
+        os.makedirs(name=directory, exist_ok=True)
+        with open(f'{directory}/{file}.pkl', 'wb') as f:
+            pickle.dump(model, f)
 
-    with open(f'{directory}/{file}.pkl', 'wb') as f:
-        pickle.dump(model, f)
-
-    with open(f'{directory}/{file}.txt', 'w') as f:
-        final_score = f'Final score for model: %{score:.2f}%'
-        f.write(f'{final_score}')
+    except Exception as e:
+        raise ValueError(f'Error saving model: {e}') from e
 
 
-def load_model(directory: str, file: str) -> Pipeline | None:
+def load_model(directory: str, file: str) -> Pipeline:
     """
     Load a model from a file in the specified directory.
 
@@ -59,14 +60,17 @@ def load_model(directory: str, file: str) -> Pipeline | None:
         file (str): The name of the file to load the model from.
 
     Returns:
-        Pipeline | None: The model if it exists, otherwise None.
+        Pipeline: The model if it exists.
+
+    Raises:
+        ValueError: If there is an error loading the model.
     """
     try:
         with open(f'{directory}/{file}.pkl', 'rb') as f:
             return pickle.load(f)
 
-    except FileNotFoundError:
-        return None
+    except FileNotFoundError as e:
+        raise ValueError(f'Model {file} not found, train the model') from e
     except Exception as e:
         raise ValueError(f'Error loading model: {e}') from e
 
@@ -80,7 +84,6 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
 
     Returns:
         list: A list of pipelines to train the model.
-
     """
     lda = LinearDiscriminantAnalysis(solver='lsqr', shrinkage='auto')
     log_reg = LogisticRegression(penalty='l2', solver='liblinear')
@@ -118,6 +121,28 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
     return pipelines
 
 
+def get_training_data(subject: int, runs: int, ica: bool = True,
+                      plot: bool = False) -> EEGProcessor:
+    """
+    Get the training data for a given subject and run(s).
+
+    Args:
+        subject (int): The subject number.
+        runs (int) | (list[int]): The run number(s).
+        ica (bool): Whether to use ICA.
+        plot (bool): Whether to plot the data.
+
+    Returns:
+        EEGProcessor: The processed data.
+    """
+    return EEGProcessor(
+        runs=[runs] if isinstance(runs, int) else runs,
+        subject=subject,
+        ica=ica,
+        plot=plot,
+    )
+
+
 def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
     """
     Train the model using cross-validation and return the
@@ -148,25 +173,8 @@ def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
                 scoring='accuracy')
 
 
-def get_training_data(subject: int, runs: int, ica: bool = True):
-    """
-    Get the training data for a given subject and run(s).
-
-    Args:
-        subject (int): The subject number.
-        runs (int) | (list[int]): The run number(s).
-        ica (bool): Whether to use ICA.
-
-    Returns:
-        tuple: A tuple containing the epochs and labels data.
-    """
-    processor = EEGProcessor(
-        runs=[runs] if isinstance(runs, int)
-        else runs, subject=subject, ica=ica, plot=False)
-    return processor.features, processor.labels
-
-
-def train_subject(subject: int, runs: int | list[int], save: bool = True):
+def train_subject(subject: int, runs: int | list[int], save: bool = True,
+                  ica: bool = True, plot: bool = False):
     """
     Train the model for a given subject and run(s).
 
@@ -174,38 +182,43 @@ def train_subject(subject: int, runs: int | list[int], save: bool = True):
         subject (int): The subject number.
         runs (int) | (list[int]): The run number(s).
         save (bool): Whether to save the data
+        ica (bool): Whether to use ICA.
+        plot (bool): Whether to plot the data.
 
     Returns:
         None
     """
-    experiment_name = get_experiment_name(runs)
-
-    best_mean = -np.inf
     best_pipeline = None
-    best_score = None
+    best_score = -np.inf
 
-    epochs, labels = get_training_data(subject, runs)
+    processed_data = get_training_data(
+        subject=subject,
+        runs=runs,
+        ica=ica,
+        plot=plot
+    )
 
-    pipelines = create_pipelines()
-
-    for pipeline_name, pipeline in pipelines:
-        score = train_model(epochs, labels, pipeline)
-        mean_score = np.mean(score)
-        if mean_score > best_mean:
-            best_mean = mean_score
+    for pipeline_name, pipeline in create_pipelines():
+        score = train_model(
+            epochs=processed_data.features,
+            labels=processed_data.labels,
+            pipeline=pipeline)
+        if np.mean(score) > np.mean(best_score):
             best_pipeline = pipeline
             best_score = score
 
     if save:
+        model_name = f"subject_{subject}_{get_experiment(runs)['name']}"
         save_model(
             directory='models',
-            file=f'subject_{subject}_{experiment_name}',
-            model=best_pipeline,
-            score=best_mean)
+            file=model_name,
+            model=best_pipeline
+        )
 
-    return best_mean, best_score
+    return np.mean(best_score), best_score
 
 
+@time_it
 def predict_subject(subject: int, run: int):
     """
     Predict the labels for a given subject and run.
@@ -217,40 +230,34 @@ def predict_subject(subject: int, run: int):
     Returns:
         None
     """
-    experiment_name = get_experiment_name(run)
-
     model = load_model(
         directory='models',
-        file=f'subject_{subject}_{experiment_name}')
+        file=f"subject_{subject}_{get_experiment(run)['name']}"
+    )
 
-    if model is None:
-        print(f'Model not found: subject {subject} and run {run}')
-        response = input('Would you like to train the model? (y/n): ')
-        if response.lower() != 'y':
-            return
-        train_subject(subject, run)
-        model = load_model(
-            directory='models',
-            file=f'subject_{subject}_{experiment_name}')
-
-    epochs, labels = get_training_data(subject, run)
+    processed_data = get_training_data(
+        subject=subject,
+        runs=run,
+        ica=False,
+        plot=False
+    )
 
     X_train, X_test, y_train, y_test = train_test_split(
-        epochs,
-        labels,
+        processed_data.features,
+        processed_data.labels,
         test_size=0.2,
         random_state=42
     )
 
     predictions = model.predict(X_test)
-    accuracy_manual = accuracy_score(y_test, predictions)
+    accuracy = accuracy_score(y_test, predictions)
 
     print(f"epoch nb: [prediction] [truth] equal?\n{'-' * 36}")
     for i, (pred, truth) in enumerate(zip(predictions, y_test)):
         equal = pred == truth
         print(f"epoch {i:02}: [{pred}]{' ' * 10}[{truth}]{' ' * 5}{equal}")
 
-    print(f"{'-' * 36}\nAccuracy: {accuracy_manual * 100:.2f}%")
+    print(f"{'-' * 36}\nAccuracy: {accuracy * 100:.2f}%")
 
 
 def train_or_predict_single_subject(subject: int, run: int, mode: str):
@@ -269,34 +276,12 @@ def train_or_predict_single_subject(subject: int, run: int, mode: str):
         ValueError: If the mode is not 'train' or 'predict'.
     """
     if mode == 'predict':
-        predict_subject(subject, run)
+        predict_subject(subject=subject, run=run)
     elif mode == 'train':
-        mean, scores = train_subject(subject=subject, runs=run)
+        mean, scores = train_subject(subject=subject, runs=run, plot=True)
         for i, score in enumerate(scores):
             print(f"Fold {i + 1} Accuracy: {score * 100:.2f}%")
         print(f"{'-' * 25}\nCross Val Score: {mean * 100:.2f}%")
-
-
-def train_subject_parallel(subject: int, runs: int, experiment_name: str):
-    """
-    Train a subject and return mean accuracy.
-
-    Args:
-        subject (int): The subject number.
-        runs (int): The run number.
-        experiment_name (str): The name of the experiment.
-
-    Returns:
-        float: The mean accuracy of the model.
-    """
-    mean, score = train_subject(subject=subject, runs=runs, save=False)
-
-    max_experiment_name_length = 30
-    experiment_name = experiment_name.replace('_', ' ').title()
-    print(f"Experiment: {experiment_name:{max_experiment_name_length}}"
-          f"| Subject: {subject:03} "
-          f"Accuracy = {mean * 100:.2f}%")
-    return mean
 
 
 def train_all_subjects():
@@ -312,21 +297,26 @@ def train_all_subjects():
 
     average_scores = {}
     for experiment in experiments:
-        runs = experiment['runs']
-        experiment_name = experiment['name']
-        scores = [train_subject_parallel(subject, runs, experiment_name)
-                  for subject in subjects]
-        average_scores[experiment_name] = np.mean(scores)
+        for subject in subjects:
+            runs = experiment['runs']
+            mean, scores = train_subject(subject, runs, save=False)
+            experiment_name = experiment['description'].title()
+            print(
+                f"Experiment: {experiment_name:52}| Subject: {subject:03} "
+                f"Accuracy = {mean * 100:.2f}%"
+            )
+            average_scores[experiment_name] = mean
 
-    print(f"{'-' * 50}")
+    print(f"{'-' * 80}")
     for experiment, mean in average_scores.items():
-        max_experiment_name_length = 30
         experiment_name = experiment.replace('_', ' ').title()
-        print(f"Experiment: {experiment_name:{max_experiment_name_length}} "
-              f"| Average Accuracy = {mean * 100:.2f}%")
+        print(
+            f"Experiment: {experiment_name:52}| "
+            f"Average Accuracy = {mean * 100:.2f}%"
+        )
 
     mean_all_experiments = np.mean(list(average_scores.values()))
-    print(f"{'-' * 50}")
+    print(f"{'-' * 80}")
     print(f"Mean Accuracy all experiments: {mean_all_experiments * 100:.2f}%")
 
 

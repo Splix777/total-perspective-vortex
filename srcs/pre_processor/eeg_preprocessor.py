@@ -1,18 +1,19 @@
 import numpy as np
 
-from dataclasses import dataclass, field, InitVar
+from dataclasses import dataclass, field
 
-from mne.preprocessing import ICA
+from mne.preprocessing import ICA, create_eog_epochs
 from mne.io import read_raw_edf
 from mne.datasets import eegbci
 from mne.io.edf.edf import RawEDF
 from mne import events_from_annotations
 from mne.channels import make_standard_montage
 from mne import concatenate_raws, Epochs, annotations_from_events, pick_types
+from mne.epochs import make_metadata
 
-from utils.utils import get_experiment_name
-from utils.decorators import time_limit
-from plotter.plotter import Plotter
+from srcs.utils.utils import get_experiment
+from srcs.utils.decorators import time_limit
+from srcs.plotter.plotter import Plotter
 
 
 @dataclass
@@ -47,18 +48,8 @@ class EEGProcessor:
         Raises:
             ValueError: If the run is invalid.
         """
-        experiment = get_experiment_name(run=self.runs)
-
-        if experiment == 'left_right_fist':
-            return {1: 'bads', 2: 'real_left', 3: 'real_right'}
-        elif experiment == 'imagine_left_right_fist':
-            return {1: 'bads', 2: 'imaginary_left', 3: 'imaginary_right'}
-        elif experiment == 'fists_feet':
-            return {1: 'bads', 2: 'real_fists', 3: 'real_feet'}
-        elif experiment == 'imagine_fists_feet':
-            return {1: 'bads', 2: 'imaginary_fists', 3: 'imaginary_feet'}
-        else:
-            raise ValueError(f'Invalid run {self.runs}')
+        experiment = get_experiment(run=self.runs)
+        return {int(k): v for k, v in experiment['mapping'].items()}
 
     @time_limit(limit=10)
     def _ica_filter(self):
@@ -99,18 +90,26 @@ class EEGProcessor:
         ica.fit(inst=self.raw, verbose=False)
 
         eog_susceptible_channels = ['Fp1', 'Fp2', 'Fz', 'F4', 'F8', 'Fpz']
+        eog_scores = None
         for channel in eog_susceptible_channels:
             eog_indices, eog_scores = ica.find_bads_eog(
                 inst=self.raw,
                 ch_name=channel,
-                threshold='auto',
+                threshold=1.5,
                 l_freq=8,
                 h_freq=30,
                 verbose=False
             )
             ica.exclude.extend(eog_indices)
 
-        ica.apply(inst=self.raw, exclude=ica.exclude, verbose=False)
+        # ica.apply(inst=self.raw, exclude=ica.exclude, verbose=False)
+
+        if self.plot:
+            self.plotter.plot_ica(
+                raw=self.raw,
+                ica=ica,
+                eog_scores=eog_scores,
+            )
 
     def _filter_raw(self):
         """
@@ -224,6 +223,9 @@ class EEGProcessor:
             montage=make_standard_montage('standard_1020'),
             verbose=False
         )
+        if self.plot:
+            self.plotter.plot_raw_data(self.raw)
+            self.plotter.plot_standard_montage(raw=self.raw)
 
     def _annotate_raw(self):
         """
@@ -256,8 +258,10 @@ class EEGProcessor:
             orig_time=self.raw.info['meas_date'],
             verbose=False
         )
-
         self.raw.set_annotations(annotations=annotations, verbose=False)
+
+        if self.plot:
+            self.plotter.plot_annotations(raw=self.raw)
 
     def _process(self, data: list):
         """
@@ -277,7 +281,6 @@ class EEGProcessor:
         self.raw = concatenate_raws([
             read_raw_edf(f, preload=True, verbose=False) for f in data
         ])
-
         self._standardize_channels()
         self._annotate_raw()
         self._filter_raw()
@@ -338,6 +341,13 @@ class EEGProcessor:
         """
         events, event_id = events_from_annotations(raw=self.raw, verbose=False)
         picks = pick_types(self.raw.info, eeg=True, exclude='bads')
+        metadata, _, _ = make_metadata(
+            events=events,
+            event_id=event_id,
+            tmin=-0.2,
+            tmax=4.0,
+            sfreq=self.raw.info['sfreq']
+        )
         self.epochs = Epochs(
             raw=self.raw,
             events=events,
@@ -347,8 +357,11 @@ class EEGProcessor:
             picks=picks,
             baseline=(None, 0),
             preload=True,
+            metadata=metadata,
             verbose=False,
         )
+        if self.plot:
+            self.plotter.plot_epochs(epochs=self.epochs, event_id=event_id)
 
     def _extract_features(self):
         """
@@ -400,6 +413,10 @@ class EEGProcessor:
             self._preprocess_subject()
             self._create_epochs()
             self._extract_features()
+            if self.plot:
+                self.plotter.report.save(
+                    fname='images/plots/plots.html',
+                    overwrite=True)
 
         except Exception as e:
             raise e
