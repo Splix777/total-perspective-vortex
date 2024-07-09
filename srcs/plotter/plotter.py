@@ -1,12 +1,14 @@
 import mne
 import os
 import matplotlib.pyplot as plt
+import numpy as np
 
 from matplotlib import use
 from mne.io.edf.edf import RawEDF
 from mne import Epochs
 
 from srcs.utils.utils import get_directory
+from srcs.reduction_algorithms.csp import CustomCSP
 
 
 class Plotter:
@@ -80,3 +82,50 @@ class Plotter:
                 titles=f'Evoked {event}',
                 n_time_points=10
             )
+
+    def plot_csp_results(self, X: np.ndarray, y: np.ndarray):
+        """
+        Fit CSP, transform the data, and plot the results
+        along with the direction of the eigenvectors.
+
+        Args:
+            X (np.ndarray): The EEG data.
+                Shape (n_epochs, n_channels, n_times).
+            y (np.ndarray): The labels for each epoch.
+                Shape (n_epochs, ).
+
+        Returns
+            None
+        """
+        csp = CustomCSP(n_components=16)
+        X_transformed = csp.fit_transform(X, y)
+        filters = csp.get_filters()
+
+        fig, ax = plt.subplots(figsize=(10, 7))
+
+        classes = np.unique(y)
+        for cls in classes:
+            ax.scatter(
+                X_transformed[y == cls, 0],
+                X_transformed[y == cls, 1],
+                label=f'Class {cls}'
+            )
+
+        origin = np.zeros((filters.shape[0], 2))
+        for vec in filters.T[:2]:
+            ax.quiver(
+                origin[:, 0], origin[:, 1],
+                vec[0], vec[1],
+                angles='xy', scale_units='xy', scale=0.1,
+                color='r', alpha=0.5
+            )
+
+        ax.set_xlabel('Component 1')
+        ax.set_ylabel('Component 2')
+        ax.legend()
+        ax.grid(True)
+
+        self.report.add_figure(
+            fig=fig,
+            title='CSP Transformed'
+        )

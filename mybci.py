@@ -20,8 +20,8 @@ from sklearn.model_selection import ShuffleSplit
 from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.metrics import accuracy_score
 
-from srcs.preprocessing_methods.csp import CustomCSP
-from srcs.pre_processor.eeg_preprocessor import EEGProcessor
+from srcs.reduction_algorithms.csp import CustomCSP
+from srcs.data_processing.eeg_preprocessor import EEGProcessor
 from srcs.utils.utils import (
     get_program_config,
     get_experiment,
@@ -112,7 +112,7 @@ def create_pipelines() -> list[tuple[str, Pipeline]]:
     # csp = CSP(n_components=4, reg=None, log=True, norm_trace=False)
     # spoc = SPoC(n_components=15, log=True, reg='oas', rank='full')
     custom_csp = CustomCSP(n_components=16)
-    # preprocessing_methods = [custom_csp, csp, spoc]
+    # reduction_algorithms = [custom_csp, csp, spoc]
     preprocessing_methods = [custom_csp]
 
     pipelines = []
@@ -163,19 +163,19 @@ def train_model(epochs: np.ndarray, labels: np.ndarray, pipeline: Pipeline):
     """
     cv = ShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
 
-    # with open(os.devnull, 'w') as fnull:
-    #     with contextlib.redirect_stdout(fnull):
-    for train_index, test_index in cv.split(epochs):
-        X_train = epochs[train_index]
-        y_train = labels[train_index]
-        pipeline.fit(X_train, y_train)
+    with open(os.devnull, 'w') as fnull:
+        with contextlib.redirect_stdout(fnull):
+            for train_index, test_index in cv.split(epochs):
+                X_train = epochs[train_index]
+                y_train = labels[train_index]
+                pipeline.fit(X_train, y_train)
 
-    return cross_val_score(
-        estimator=pipeline,
-        X=epochs,
-        y=labels,
-        cv=cv,
-        scoring='accuracy')
+            return cross_val_score(
+                estimator=pipeline,
+                X=epochs,
+                y=labels,
+                cv=cv,
+                scoring='accuracy')
 
 
 def train_subject(subject: int, runs: int | list[int], save: bool = True,
@@ -283,7 +283,7 @@ def train_or_predict_single_subject(subject: int, run: int, mode: str):
     if mode == 'predict':
         predict_subject(subject=subject, run=run)
     elif mode == 'train':
-        mean, scores = train_subject(subject=subject, runs=run, plot=False)
+        mean, scores = train_subject(subject=subject, runs=run, plot=True)
         for i, score in enumerate(scores):
             print(f"Fold {i + 1} Accuracy: {score * 100:.2f}%")
         print(f"{'-' * 25}\nCross Val Score: {mean * 100:.2f}%")

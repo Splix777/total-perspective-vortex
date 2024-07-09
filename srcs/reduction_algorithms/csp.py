@@ -1,8 +1,6 @@
 import numpy as np
 from itertools import combinations
 
-from matplotlib import pyplot as plt
-from mne.viz import plot_topomap
 from sklearn.base import BaseEstimator, TransformerMixin
 
 
@@ -263,28 +261,8 @@ class CustomCSP(BaseEstimator, TransformerMixin):
         except Exception as e:
             raise e
 
-    def plot_csp_scatter(self, X_transformed: np.ndarray, y: np.ndarray):
+    def get_filters(self):
         """
-        Plot a 2D scatter plot of the transformed data with CSP filters as vectors.
-
-        Args:
-            X_transformed (np.ndarray): The transformed EEG data.
-                Shape (n_epochs, n_components).
-            y (np.ndarray): The labels for each epoch.
-                Shape (n_epochs, ).
+        Get the CSP filters.
         """
-        plt.figure(figsize=(10, 7))
-        for label in np.unique(y):
-            plt.scatter(X_transformed[y == label, 0], X_transformed[y == label, 1], label=f'Class {label}')
-
-        # Plot the CSP filters as vectors
-        for i in range(2):
-            plt.quiver(0, 0, self.filters[i, 0], self.filters[i, 1], angles='xy', scale_units='xy', scale=1, color='r', alpha=0.5)
-
-        plt.title('CSP Transformed Data and Filters')
-        plt.xlabel('Component 1')
-        plt.ylabel('Component 2')
-        plt.legend()
-        plt.grid(True)
-        plt.show()
-
+        return self.filters

@@ -157,7 +157,16 @@ def verify_inputs(subject: int, run: int, mode: str):
     raise ValueError('Mode must be either "train" or "predict"')
 
 
-def print_error_tree(e):
+def print_error_tree(e: Exception):
+    """
+    Prints the error tree from the exception.
+
+    Args:
+        e (Exception): The exception to print the error tree.
+
+    Returns:
+        None
+    """
     tb = traceback.extract_tb(e.__traceback__)
     print('Traceback (most recent call last):')
     for frame in tb:
