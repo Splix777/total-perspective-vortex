@@ -191,7 +191,7 @@ def download_subjects():
         """
         Signal handler for SIGTERM.
         """
-        print("Received SIGTERM. Terminating download process.")
+        print("\nReceived SIGTERM. Terminating download process.")
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, sigterm_handler)
