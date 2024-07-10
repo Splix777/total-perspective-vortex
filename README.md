@@ -57,7 +57,7 @@ what matters for the desired output.
 One example is to use the power of the signal by frequency and by channel
 to the pipeline’s input.
 
-[plots](images/plots/plots.html)
+[plots](https://raw.githubusercontent.com/Splix777/total-perspective-vortex/master/images/plots/plots.html)
 
 
 
