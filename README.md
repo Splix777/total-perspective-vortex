@@ -95,7 +95,7 @@ PCA is a more general algorithm, but CSP is more used in EEG BCIs.
 
 Let's take the formal expression of an EEG signal:
 
-- `N` the number of events of every class.
+- `N` the number of events per class.
 - `ch` number of channels (electrodes)
 - `time` the length of event recording
 
