@@ -1,12 +1,6 @@
-import contextlib
-import os
-
 import mne
-import numpy as np
 
-from dataclasses import dataclass, field
 from autoreject import AutoReject
-
 
 from mne.preprocessing import ICA
 from mne.io import read_raw_edf
@@ -380,6 +374,7 @@ class EEGProcessor:
             metadata=metadata,
             verbose=False,
         )
+        # Uncomment to equalize event counts (optional)
         # self.epochs.equalize_event_counts(event_ids=event_id)
         if self.plot:
             self.plotter.plot_epochs(epochs=self.epochs, event_id=event_id)

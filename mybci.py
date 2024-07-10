@@ -393,7 +393,7 @@ def main():
     try:
         bci()
     except KeyboardInterrupt as e:
-        print("Program interrupted by user.")
+        print(f"Program interrupted by user: {e}")
     except Exception as e:
         print_error_tree(e)
 
