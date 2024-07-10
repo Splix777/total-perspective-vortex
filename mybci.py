@@ -307,7 +307,7 @@ def train_all_subjects():
         None
     """
     # For testing, we won't use all 109 subjects
-    subjects = list(range(1, 3))
+    subjects = list(range(1, 21))
     experiments = get_program_config()['experiments']
 
     average_scores = {}

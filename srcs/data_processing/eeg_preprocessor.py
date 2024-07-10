@@ -5,6 +5,8 @@ import mne
 import numpy as np
 
 from dataclasses import dataclass, field
+from autoreject import AutoReject
+
 
 from mne.preprocessing import ICA
 from mne.io import read_raw_edf
@@ -53,8 +55,8 @@ class EEGProcessor:
         experiment = get_experiment(run=self.runs)
         return {int(k): v for k, v in experiment['mapping'].items()}
 
-    @time_limit(limit=10)
-    def _ica_filter(self, raw: RawEDF):
+    @time_limit(limit=30)
+    def _ica_filter(self):
         """
         Independent Component Analysis (ICA) is used to remove
         eye movement artifacts from the raw data. The function
@@ -82,33 +84,42 @@ class EEGProcessor:
         Returns:
             None
         """
+        ar = AutoReject(
+            n_interpolate=[2, 3],
+            random_state=42,
+            picks=mne.pick_types(self.epochs.info, eeg=True, eog=False),
+            n_jobs=-1,
+            verbose=False
+        )
+        ar.fit(self.epochs)
+
         ica = ICA(
-            n_components=20,
-            max_iter=10_000,
+            n_components=.99,
             method='fastica',
+            max_iter=5_000,
             random_state=42,
             verbose=False
         )
-        ica.fit(inst=raw, verbose=False)
+        ica.fit(inst=self.epochs, verbose=False)
 
         eog_susceptible_channels = ['Fp1', 'Fp2', 'Fz', 'F4', 'F8', 'Fpz']
         eog_scores = None
         for channel in eog_susceptible_channels:
             eog_indices, eog_scores = ica.find_bads_eog(
-                inst=raw,
+                inst=self.epochs,
                 ch_name=channel,
-                threshold=1.5,
-                l_freq=5,
+                threshold='auto',
+                l_freq=8,
                 h_freq=30,
                 verbose=False
             )
             ica.exclude.extend(eog_indices)
 
-        ica.apply(inst=raw, exclude=ica.exclude, verbose=False)
+        ica.apply(inst=self.epochs, exclude=ica.exclude, verbose=False)
 
-        if self.plot and ica.exclude:
+        if self.plot:
             self.plotter.plot_ica(
-                raw=raw,
+                epochs=self.epochs,
                 ica=ica,
                 eog_scores=eog_scores,
             )
@@ -283,14 +294,13 @@ class EEGProcessor:
             raw (RawEDF): raw file post-processing
         """
 
-        raw = concatenate_raws([
+        original_raw = concatenate_raws([
             read_raw_edf(f, preload=True, verbose=False) for f in data
         ])
+        raw = original_raw.copy()
         self._standardize_channels(raw=raw)
         self._annotate_raw(raw=raw)
         self._filter_raw(raw=raw)
-        if self.ica:
-            self._ica_filter(raw=raw)
         self._re_reference_raw(raw=raw)
         self._downsample_raw(raw=raw, sfreq=160)
         return raw
@@ -365,7 +375,7 @@ class EEGProcessor:
             tmin=-0.2,
             tmax=4.0,
             picks=picks,
-            baseline=(None, 0),
+            baseline=None,
             preload=True,
             metadata=metadata,
             verbose=False,
@@ -426,14 +436,20 @@ class EEGProcessor:
         try:
             self._preprocess_subject()
             self._create_epochs()
+            if self.ica:
+                self._ica_filter()
             self._extract_features()
             if self.plot:
                 self.plotter.report.save(
                     fname=f'{self.plotter.save_directory}/plots.html',
                     overwrite=True
                 )
-            del self.raw, self.epochs
             return self.features, self.labels
 
         except Exception as e:
             raise e
+
+
+if __name__ == '__main__':
+    process = EEGProcessor(subject=1, runs=[3], ica=True, plot=False)
+    preprocess_data = process.preprocess_data()

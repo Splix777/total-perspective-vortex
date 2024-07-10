@@ -62,19 +62,19 @@ class Plotter:
             sfreq=sfreq
         )
 
-    def plot_ica(self, raw: RawEDF, ica, eog_scores):
+    def plot_ica(self, epochs: Epochs, ica, eog_scores):
         self.report.add_ica(
             ica=ica,
             title='Ica Filtering',
             picks=ica.exclude,
-            inst=raw,
+            inst=epochs,
             eog_scores=eog_scores,
-            n_jobs=1
+            n_jobs=-1
         )
 
     def plot_epochs(self, epochs: Epochs, event_id: dict):
         self.report.add_epochs(epochs=epochs, title='Epochs')
-        for event in event_id.keys():
+        for event in event_id:
             evoked = epochs[event].average()
             self.report.add_evokeds(
                 evokeds=evoked,

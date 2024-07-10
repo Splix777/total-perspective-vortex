@@ -38,7 +38,7 @@ def get_program_config(config_path: str = 'config.json'):
         raise ValueError('config_path must be a valid path') from e
 
 
-def get_directory(directory: str, config_path: str = 'config.json') -> Path:
+def get_directory(directory: str) -> Path:
     """
     Retrieves the directory path from the configuration file.
 
@@ -54,7 +54,7 @@ def get_directory(directory: str, config_path: str = 'config.json') -> Path:
         ValueError: If the directory key is not found in the
             configuration file.
     """
-    config = get_program_config(config_path)
+    config = get_program_config()
     try:
         directory_path = config['directories'][directory]
         project_root = Path(__file__).resolve().parent.parent.parent
@@ -185,7 +185,7 @@ def download_subjects():
     """
     Downloads the subjects from the dataset.
     """
-    subjects = list(range(1, 2))
+    subjects = list(range(1, 110))
 
     def sigterm_handler(signum, frame):
         """
