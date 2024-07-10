@@ -49,7 +49,7 @@ class EEGProcessor:
         experiment = get_experiment(run=self.runs)
         return {int(k): v for k, v in experiment['mapping'].items()}
 
-    @time_limit(limit=30)
+    @time_limit(limit=60)
     def _ica_filter(self):
         """
         Independent Component Analysis (ICA) is used to remove
@@ -88,7 +88,7 @@ class EEGProcessor:
         ar.fit(self.epochs)
 
         ica = ICA(
-            n_components=.99,
+            n_components=20,
             method='fastica',
             max_iter=5_000,
             random_state=42,
