@@ -86,7 +86,7 @@ the most "important" variations. It is called a change of basis, and it is
 a transformation composed of rotations, translations and scaling operations.
 
 As such, the PCA considers your dataset and determines new basis components,
-sorted by how much those axises account for variations in the data.
+sorted by how much those axes account for variations in the data.
 
 The [CSP](https://doc.ml.tu-berlin.de/bbci/publications/BlaTomLemKawMue08.pdf) 
 or common spatial patterns, analyses the data depending on the output
